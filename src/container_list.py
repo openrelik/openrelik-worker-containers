@@ -134,32 +134,40 @@ def container_list(
         subprocess.run(unmount_disk, capture_output=False, check=True)
 
         # combined and pretty output
-        drifts = []
+        output_data = []
 
         with open(containerd_output_file.path, "r", encoding="utf-8") as f:
-            data = json.loads(f.read())
-            drifts.extend(data)
+            try:
+                data = json.loads(f.read())
+                if data:
+                    output_data.extend(data)
+            except json.decoder.JSONDecodeError:
+                # A disk may not have containerd containers
+                pass
 
         with open(docker_output_file.path, "r", encoding="utf-8") as f:
-            data = json.loads(f.read())
-            drifts.extend(data)
+            try:
+                data = json.loads(f.read())
+                if data:
+                    output_data.extend(data)
+            except json.decoder.JSONDecodeError:
+                # A disk may not have Docker containers
+                pass
 
-        combined_output = create_output_file(
-            output_path, display_name="container_list", extension="json"
-        )
+        if output_data:
+            combined_output = create_output_file(
+                output_path, display_name="container_list", extension="json"
+            )
 
-        with open(combined_output.path, "w", encoding="utf-8") as f:
-            json.dump(drifts, f, indent=4)
+            with open(combined_output.path, "w", encoding="utf-8") as f:
+                json.dump(output_data, f, indent=4)
 
-        output_files.append(combined_output.to_dict())
+            output_files.append(combined_output.to_dict())
 
     # Clean disk
     if temp_dir:
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
-
-    if not output_files:
-        raise RuntimeError("Listing containers did not generate output")
 
     return create_task_result(
         output_files=output_files,
