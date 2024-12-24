@@ -42,9 +42,10 @@ DISK_MOUNT_DIR = "/mnt"
 CONTAINERD_ROOT_DIR = os.path.join(DISK_MOUNT_DIR, "var", "lib", "containerd")
 DOCKER_ROOT_DIR = os.path.join(DISK_MOUNT_DIR, "var", "lib", "docker")
 
+
 def read_container_explorer_output(path: str) -> List[Dict]:
     """Reads Container Explorer's JSON output and returns list.
-    
+
     Args:
         path: JSON output file produced by Container Explorer.
 
