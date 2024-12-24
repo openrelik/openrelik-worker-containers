@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "openrelik-worker-containers"
-version = "2024.12.20"
+version = "2024.12.24"
 description = "container explorer"
 authors = ["roshan maskey <roshanmaskey@gmail.com>"]
 license = "Apache 2.0"

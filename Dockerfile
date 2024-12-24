@@ -10,19 +10,15 @@ RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selectio
 
 # Install dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common \
     python3-pip \
     python3-poetry \
-    gpg-agent \
     wget \
-    tzdata \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Plaso
-RUN add-apt-repository -y ppa:gift/$PPA_TRACK
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    plaso-tools \
-  && rm -rf /var/lib/apt/lists/*
+# Install latest release of container explorer
+RUN wget -O /tmp/container-explorer-setup.sh https://raw.githubusercontent.com/google/container-explorer/main/script/setup.sh
+RUN chmod +x /tmp/container-explorer-setup.sh
+RUN /tmp/container-explorer-setup.sh install
 
 # Configure poetry
 ENV POETRY_NO_INTERACTION=1 \
@@ -43,20 +39,15 @@ WORKDIR /openrelik
 RUN poetry config virtualenvs.options.system-site-packages true
 
 # Copy poetry toml and install dependencies
-COPY ./pyproject.toml ./poetry.lock .
+COPY ./pyproject.toml ./poetry.lock ./
 RUN poetry install --no-interaction --no-ansi
 
 # Copy all worker files
 COPY . ./
-
-# Install latest release of container explorer
-RUN wget -O /tmp/container-explorer-setup.sh https://raw.githubusercontent.com/google/container-explorer/main/script/setup.sh
-RUN chmod +x /tmp/container-explorer-setup.sh
-RUN /tmp/container-explorer-setup.sh install
 
 # Install the worker and set environment to use the correct python interpreter.
 RUN poetry install && rm -rf $POETRY_CACHE_DIR
 ENV VIRTUAL_ENV=/app/.venv PATH="/openrelik/.venv/bin:$PATH"
 
 # Default command if not run from docker-compose (and command being overidden)
-CMD ["celery", "--app=src.tasks", "worker", "--task-events", "--concurrency=1", "--loglevel=DEBUG"]
+CMD ["celery", "--app=src.tasks", "worker", "--task-events", "--concurrency=1", "--loglevel=INFO"]
