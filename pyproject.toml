@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "openrelik-worker-containers"
+version = "2024.12.24"
+description = "container explorer"
+authors = ["roshan maskey <roshanmaskey@gmail.com>"]
+license = "Apache 2.0"
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+celery = {extras = ["redis"], version = "^5.4.0"}
+openrelik-worker-common = "^2024.11.27"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
