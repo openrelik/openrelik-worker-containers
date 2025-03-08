@@ -165,3 +165,52 @@ def mount_container(
         return _container_mount_dir
 
     return None
+
+
+def get_directory_size(directory: str) -> int:
+    """Calculates the total size of a directory in bytes.
+
+    Args:
+        directory: the path of the directory.
+
+    Returns:
+        The total size of the directory in bytes, or zero if directory does not exist.
+    """
+    total_size = 0
+
+    try:
+        for root, dirs, files in os.walk(directory):
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+                try:
+                    total_size += os.path.getsize(file_path)
+                except OSError:
+                    print(f"Unable to get size of {file_path}")
+                    continue
+        return total_size
+    except FileNotFoundError:
+        print(f"Directory {directory} not found")
+        return 0
+    except PermissionError:
+        print(f"Permission denied for directory {directory}")
+        return 0
+
+
+def create_disk_image(path: str, volume_name: str, size: int) -> None:
+    """Creates a disk image and formats to EXT4.
+
+    Args:
+        path: Path of the disk to be created.
+        volume_name: Volume name to set for the disk.
+        size: Size of the disk in MB.
+
+    Returns:
+        The path of the disk image, or None.
+    """
+    command = f"dd if=/dev/zero of={path} bs=1M count={size} status=none"
+    subprocess.run(command, check=False, shell=True, capture_output=True)
+
+    command = f"mkfs.ext4 -q -L {volume_name} {path}"
+    subprocess.run(command, check=False, shell=True, capture_output=True)
+
+    return path
