@@ -166,6 +166,7 @@ def mount_container(
 
     return None
 
+
 def _mount_all_custom_containers(path: str, mount_point: str) -> int:
     """Mount containers in custom root directory.
 
@@ -200,6 +201,7 @@ def _mount_all_custom_containers(path: str, mount_point: str) -> int:
 
     files = os.listdir(mount_point)
     return len(files)
+
 
 def _mount_all_default_containers(path: str, mount_point: str) -> int:
     """Mount containers in default root directory.
@@ -237,7 +239,10 @@ def _mount_all_default_containers(path: str, mount_point: str) -> int:
     files = os.listdir(mount_point)
     return len(files)
 
-def mount_all_containers(path: str, mount_point: str, container_root_dir: str = None) -> int:
+
+def mount_all_containers(
+    path: str, mount_point: str, container_root_dir: str = None
+) -> int:
     """Mount all containers.
 
     Args:
@@ -255,7 +260,9 @@ def mount_all_containers(path: str, mount_point: str, container_root_dir: str = 
     # Processing containers with custom container root directory.
     if container_root_dir:
         container_root_path = os.path.join(path, container_root_dir)
-        custom_container_count = _mount_all_custom_containers(container_root_path, mount_point)
+        custom_container_count = _mount_all_custom_containers(
+            container_root_path, mount_point
+        )
 
     default_container_count = mount_all_default_containers(path, mount_point)
 
@@ -269,6 +276,7 @@ def mount_all_containers(path: str, mount_point: str, container_root_dir: str = 
         total_containers += default_container_count
 
     return total_containers
+
 
 def get_directory_size(directory: str) -> int:
     """Calculates the total size of a directory in bytes.
