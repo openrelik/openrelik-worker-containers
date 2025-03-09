@@ -166,6 +166,109 @@ def mount_container(
 
     return None
 
+def _mount_all_custom_containers(path: str, mount_point: str) -> int:
+    """Mount containers in custom root directory.
+
+    Args:
+        path: Path of custom root directory.
+        mount_point: Path were containers should be mounted.
+
+    Returns:
+        Number of containers mounted, or -1 when error is encounted.
+    """
+    # Mounting all containerd container in custom root directory.
+    command = [
+        CE_BINARY,
+        "--containerd-root",
+        path,
+        "mount-all",
+        mount_point,
+    ]
+    subprocess.run(command, check=False, shell=True)
+
+    # Mounting all Docker containers in custom root directory.
+    command = [
+        CE_BINARY,
+        "--docker-managed",
+        "--docker-root",
+        path,
+        "mount-all",
+        mount_point,
+    ]
+
+    subprocess.run(command, check=False, shell=True)
+
+    files = os.listdir(mount_point)
+    return len(files)
+
+def _mount_all_default_containers(path: str, mount_point: str) -> int:
+    """Mount containers in default root directory.
+
+    Args:
+        path: Path where OS disk is mounted.
+        mount_point: Path where containers should be mounted.
+
+    Returns:
+        Number of containers mounted, or -1 when error is encountered.
+    """
+    # Mount all containerd containers.
+    command = [
+        CE_BINARY,
+        "--image-root",
+        path,
+        "mount-all",
+        mount_point,
+    ]
+
+    subprocess.run(command, check=False, shell=True)
+
+    # Mount all Docker containers.
+    command = [
+        CE_BINARY,
+        "--docker-managed",
+        "--image-root",
+        path,
+        "mount-all",
+        mount_point,
+    ]
+
+    subprocess.run(command, check=False, shell=True)
+
+    files = os.listdir(mount_point)
+    return len(files)
+
+def mount_all_containers(path: str, mount_point: str, container_root_dir: str = None) -> int:
+    """Mount all containers.
+
+    Args:
+        path: Path where OS disk is mounted.
+        mount_point: Path where containers should be mounted.
+        container_root_dir: Container root directory.
+
+    Returns:
+        Number of containers mounted, or -1 when error is encountered.
+    """
+    total_containers = 0
+    custom_container_count = 0
+    default_container_count = 0
+
+    # Processing containers with custom container root directory.
+    if container_root_dir:
+        container_root_path = os.path.join(path, container_root_dir)
+        custom_container_count = _mount_all_custom_containers(container_root_path, mount_point)
+
+    default_container_count = mount_all_default_containers(path, mount_point)
+
+    if custom_container_count == -1 and default_container_count == -1:
+        return -1
+
+    if custom_container_count > 0:
+        total_containers += custom_container_count
+
+    if default_container_count > 0:
+        total_containers += default_container_count
+
+    return total_containers
 
 def get_directory_size(directory: str) -> int:
     """Calculates the total size of a directory in bytes.
