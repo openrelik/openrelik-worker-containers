@@ -1,5 +1,3 @@
-"""Utility file for containers worker."""
-
 # Copyright 2025 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,10 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Utility for exporting containers."""
+
+import logging
 import os
 import subprocess
 
+from typing import List, Optional
+
 from openrelik_worker_common.file_utils import OutputFile
+
+logger = logging.getLogger(__name__)
 
 CE_BINARY = "/opt/container-explorer/bin/ce"
 
@@ -29,9 +34,13 @@ def log_entry(log_file: OutputFile, message: str) -> None:
         log_file: log file.
         message: log message.
     """
-    with open(log_file.path, "a", encoding="utf-8") as log_writer:
-        log_writer.write(message)
-        log_writer.write("")
+    try:
+        with open(log_file.path, "a", encoding="utf-8") as log_writer:
+            log_writer.write(message)
+            log_writer.write("\n")
+    except Exception as e:
+        logger.error("Failed to write to log file %s: %s", log_file.path, e)
+        logger.info("Original log message: %s", message)
 
 
 def mount_disk(image_path: str, mount_point: str) -> str:
@@ -53,13 +62,39 @@ def mount_disk(image_path: str, mount_point: str) -> str:
         image_path,
         mount_point,
     ]
+    logger.info("Attempting to mount disk %s at %s", image_path, mount_point)
+    logger.debug("Mount command: %s", " ".join(disk_mount_command))
 
-    process = subprocess.run(
-        disk_mount_command, capture_output=True, check=False, text=True
-    )
-    if process.returncode == 0:
-        return mount_point
-    return None
+    try:
+        process = subprocess.run(
+            disk_mount_command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=60,
+        )
+        if process.returncode == 0:
+            logger.info("Successfully mounted disk %s at %s", image_path, mount_point)
+            return mount_point
+        else:
+            logger.error(
+                "Failed to mount disk %s. Return code: %d, Stderr: %s",
+                image_path,
+                process.returncode,
+                process.stderr.strip(),
+            )
+            return None
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout expired while mounting disk %s", image_path)
+        return None
+    except Exception as e:
+        logger.error(
+            "Exception occurred while mounting disk %s: %s",
+            image_path,
+            e,
+            exc_info=True,
+        )
+        return None
 
 
 def _mount_container(
@@ -75,6 +110,13 @@ def _mount_container(
     Returns:
         Path where container is mounted or None.
     """
+    if not os.path.exists(container_root_dir):
+        logger.debug(
+            "Container root directory %s does not exist, skipping mount attempt.",
+            container_root_dir,
+        )
+        return None
+
     # Try mounting as containerd container
     containerd_mount_command = [
         CE_BINARY,
@@ -84,59 +126,137 @@ def _mount_container(
         container_id,
         container_mount_dir,
     ]
-
-    process = subprocess.run(
-        containerd_mount_command, capture_output=True, check=False, text=True
+    logger.info(
+        "Attempting to mount containerd container %s from %s to %s",
+        container_id,
+        container_root_dir,
+        container_mount_dir,
     )
-    if process.returncode == 0:
-        return container_mount_dir
+    logger.debug("Containerd mount command: %s", " ".join(containerd_mount_command))
+
+    try:
+        process = subprocess.run(
+            containerd_mount_command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=60,
+        )
+        if process.returncode == 0:
+            logger.info(
+                "Succesffully mounted containerd container %s at %s",
+                container_id,
+                container_mount_dir,
+            )
+            return container_mount_dir
+        else:
+            logger.warning(
+                "Failed to mount as containerd container %s from %s. Stderr: %s",
+                container_id,
+                container_root_dir,
+                process.stderr.strip(),
+            )
+    except subprocess.TimeoutExpired:
+        logger.error(
+            "Timeout expired while mounting containerd container %s from %s",
+            container_id,
+            container_root_dir,
+        )
+    except Exception as e:
+        logger.error(
+            "Exception occurred while mounting containerd container %s from %s: %s",
+            container_id,
+            container_root_dir,
+            e,
+            exc_info=True,
+        )
 
     # Try mounting as Docker container
     docker_mount_command = [
         CE_BINARY,
+        "--docker-managed",
         "--docker-root",
         container_root_dir,
         "mount",
         container_id,
         container_mount_dir,
     ]
-
-    process = subprocess.run(
-        docker_mount_command, capture_output=True, check=False, text=True
+    logger.info(
+        "Attempting to mount Docker container %s from %s to %s",
+        container_id,
+        container_root_dir,
+        container_mount_dir,
     )
-    if process.returncode == 0:
-        return container_mount_dir
+    logger.debug("Docker mount command: %s", " ".join(docker_mount_command))
 
-    return None
+    try:
+        process = subprocess.run(
+            docker_mount_command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=60,
+        )
+        if process.returncode == 0:
+            logger.info(
+                "Successfully mounted Docker container %s at %s",
+                container_id,
+                container_mount_dir,
+            )
+            return container_mount_dir
+        else:
+            logger.error(
+                "Failed to mount as Docker container %s from %s. Return code: %d, Stderr: %s",
+                container_id,
+                container_root_dir,
+                process.returncode,
+                process.stderr.strip(),
+            )
+            return None
+    except subprocess.TimeoutExpired:
+        logger.error(
+            "Timeout expired while mounting Docker container %s from %s",
+            container_id,
+            container_root_dir,
+        )
+        return None
+    except Exception as e:
+        logger.error(
+            "Exception occurred while mounting Docker container %s from %s: %s",
+            container_id,
+            container_root_dir,
+            e,
+            exc_info=True,
+        )
+        return None
 
 
 def mount_container(
     container_id: str,
     disk_mount_dir: str,
-    container_mount_dir: str = None,
-    container_root_dir: str = None,
-) -> str:
+    container_mount_dir: str,
+    container_root_dir: Optional[str] = None,
+) -> str | None:
     """Mounts specified container ID and returns the container mount point.
 
     Args:
         container_id: ID of the container to be mounted.
         disk_mount_dir: Mount point of the disk containing the container.
-        container_mount_dir: Path to mount the container. If this value is not specified /tmp/mnt
-            is used.
+        container_mount_dir: Path to mount the container.
         container_root_dir: Absolute path of the container root directory in the disk.
             If this value is not present, default directory is used for containerd and Docker.
 
     Returns:
         Path where container is mounted or None.
     """
-    container_root_path = None
+    logger.info("Attempting to mount container ID: %s", container_id)
 
-    if not container_mount_dir:
-        container_mount_dir = "/tmp/mnt"
+    container_root_path = None
 
     # Mounting container located at custom directory.
     if container_root_dir:
         container_root_path = os.path.join(disk_mount_dir, container_root_dir)
+        logger.info("Using custom container root path: %s", container_root_path)
 
         _container_mount_dir = _mount_container(
             container_id, container_root_path, container_mount_dir
@@ -146,182 +266,266 @@ def mount_container(
 
         # If custom container_root_dir is provided, we are not going to check
         # the default locations for Docker and containerd paths.
+        logger.error(
+            "Failed to mount container %s from custom path %s",
+            container_id,
+            container_root_path,
+        )
         return None
 
     # Attempt mounting as containerd container.
     container_root_path = os.path.join(disk_mount_dir, "var", "lib", "containerd")
+    logger.info("Trying default containerd root path: %s", container_root_path)
     _container_mount_dir = _mount_container(
         container_id, container_root_path, container_mount_dir
     )
-    if container_mount_dir:
+    if _container_mount_dir:
         return _container_mount_dir
+    logger.info(
+        "Mount attempt failed for default containerd path %s", container_root_path
+    )
 
     # Attempt mounting as Docker container.
     container_root_path = os.path.join(disk_mount_dir, "var", "lib", "docker")
+    logger.info("Trying default Docker root path: %s", container_root_path)
     _container_mount_dir = _mount_container(
-        container_id, container_root_dir, container_mount_dir
+        container_id, container_root_path, container_mount_dir
     )
-    if container_mount_dir:
+    if _container_mount_dir:
         return _container_mount_dir
+    logger.info("Mount attempt failed for default Docker path %s", container_root_path)
+
+    logger.error("Failed to mount container %s using default paths.", container_id)
+    return None
+
+
+def _mount_all_containers(
+    container_mount_dir: str, container_root_dir: str
+) -> str | None:
+    """Mounts all containers and returns the list of containers.
+
+    Args:
+        container_mount_dir: Root directory where containers will be mounted under subdirectories.
+        container_root_dir: Container root directory.
+    """
+    if not os.path.exists(container_root_dir):
+        logger.debug(
+            "Container root directory %s does not exist, skipping mount-all attempt.",
+            container_root_dir,
+        )
+        return None
+
+    # Try mounting as containerd container
+    containerd_mount_command = [
+        CE_BINARY,
+        "--support-container-data",
+        "/opt/container-explorer/etc/supportcontainer.yaml",
+        "--containerd-root",
+        container_root_dir,
+        "mount-all",
+        container_mount_dir,
+    ]
+    logger.info(
+        "Attempting to mount all containerd containers from %s to %s",
+        container_root_dir,
+        container_mount_dir,
+    )
+
+    logger.debug("Containerd mount-all command: %s", " ".join(containerd_mount_command))
+
+    try:
+        process = subprocess.run(
+            containerd_mount_command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=120,
+        )
+        if process.returncode == 0:
+            logger.info(
+                "Successfully ran mount-all for containerd from %s", container_root_dir
+            )
+            return "containerd"
+        else:
+            logger.warning(
+                "Failed mount-all for containerd from %s. Stderr: %s",
+                container_root_dir,
+                process.stderr.strip(),
+            )
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "Timeout expired while mounting all containerd containers from %s",
+            container_root_dir,
+        )
+    except Exception as e:
+        logger.warning(
+            "Exception occurred while mounting all containerd containers from %s: %s",
+            container_root_dir,
+            e,
+            exc_info=True,
+        )
+
+    # Try mounting as Docker container
+    docker_mount_command = [
+        CE_BINARY,
+        "--docker-managed",
+        "--docker-root",
+        container_root_dir,
+        "mount-all",
+        container_mount_dir,
+    ]
+    logger.info(
+        "Attempting to mount all for Docker containers from %s to %s",
+        container_root_dir,
+        container_mount_dir,
+    )
+    logger.debug("Docker mount-all command: %s", " ".join(docker_mount_command))
+
+    try:
+        process = subprocess.run(
+            docker_mount_command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=120,
+        )
+        if process.returncode == 0:
+            logger.info(
+                "Successfully ran mount-all for Docker containers from %s",
+                container_root_dir,
+            )
+            return "docker"
+        else:
+            logger.warning(
+                "Failed mount-all for Docker continers from %s. Stderr: %s",
+                container_root_dir,
+                process.stderr.strip(),
+            )
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "Timeout expired during moun-all for Docker containers from %s",
+            container_root_dir,
+        )
+    except Exception as e:
+        logger.warning(
+            "Exception during mount-all for Docker containers from %s: %s",
+            container_root_dir,
+            e,
+            exc_info=True,
+        )
 
     return None
 
 
-def _mount_all_custom_containers(path: str, mount_point: str) -> int:
-    """Mount containers in custom root directory.
-
-    Args:
-        path: Path of custom root directory.
-        mount_point: Path were containers should be mounted.
-
-    Returns:
-        Number of containers mounted, or -1 when error is encounted.
-    """
-    # Mounting all containerd container in custom root directory.
-    command = [
-        CE_BINARY,
-        "--containerd-root",
-        path,
-        "mount-all",
-        mount_point,
-    ]
-    subprocess.run(command, check=False, shell=True)
-
-    # Mounting all Docker containers in custom root directory.
-    command = [
-        CE_BINARY,
-        "--docker-managed",
-        "--docker-root",
-        path,
-        "mount-all",
-        mount_point,
-    ]
-
-    subprocess.run(command, check=False, shell=True)
-
-    files = os.listdir(mount_point)
-    return len(files)
-
-
-def _mount_all_default_containers(path: str, mount_point: str) -> int:
-    """Mount containers in default root directory.
-
-    Args:
-        path: Path where OS disk is mounted.
-        mount_point: Path where containers should be mounted.
-
-    Returns:
-        Number of containers mounted, or -1 when error is encountered.
-    """
-    # Mount all containerd containers.
-    command = [
-        CE_BINARY,
-        "--image-root",
-        path,
-        "mount-all",
-        mount_point,
-    ]
-
-    subprocess.run(command, check=False, shell=True)
-
-    # Mount all Docker containers.
-    command = [
-        CE_BINARY,
-        "--docker-managed",
-        "--image-root",
-        path,
-        "mount-all",
-        mount_point,
-    ]
-
-    subprocess.run(command, check=False, shell=True)
-
-    files = os.listdir(mount_point)
-    return len(files)
-
-
 def mount_all_containers(
-    path: str, mount_point: str, container_root_dir: str = None
-) -> int:
-    """Mount all containers.
+    path: str,
+    container_mount_dir: str,
+    container_root_dir: Optional[str] = None,
+    log_file: Optional[OutputFile] = None,
+) -> List[str]:
+    """Mounts all containers and returns the list of containers.
 
     Args:
-        path: Path where OS disk is mounted.
-        mount_point: Path where containers should be mounted.
-        container_root_dir: Container root directory.
+        path: Mount point of the disk containing the containers.
+        container_mount_dir: Root directory where containers will be mounted under subdirectories.
+        container_root_dir: Custom container root directory. i.e. other than /var/lib/docker and
+                /var/lib/containerd.
 
     Returns:
-        Number of containers mounted, or -1 when error is encountered.
+        List of mounted container IDs.
     """
-    total_containers = 0
-    custom_container_count = 0
-    default_container_count = 0
+    mounted_something = False
+    container_root_path = None
 
-    # Processing containers with custom container root directory.
+    logger.info(
+        "Attempting to mount all containers from disk mounted at %s into %s",
+        path,
+        container_mount_dir,
+    )
+
+    # Mounting custom container root
     if container_root_dir:
         container_root_path = os.path.join(path, container_root_dir)
-        custom_container_count = _mount_all_custom_containers(
-            container_root_path, mount_point
-        )
+        logger.info("Trying custom container root path: %s", container_root_path)
 
-    default_container_count = mount_all_default_containers(path, mount_point)
+        container_type = _mount_all_containers(container_mount_dir, container_root_path)
+        if not container_type:
+            logger.warning(
+                "Failed to mount containers from custom path %s", container_root_path
+            )
+            if log_file:
+                log_entry(
+                    log_file,
+                    f"Error mounting conainers from container root {container_root_dir}",
+                )
+        else:
+            mounted_something = True
+            logger.info(
+                "Successfully mounted containers (type: %s) from custom path %s",
+                container_type,
+                container_root_path,
+            )
+    else:
+        # Trying mounting containerd containers from default path
+        container_root_path = os.path.join(path, "var", "lib", "containerd")
+        logger.info("Trying default containerd root path: %s", container_root_path)
 
-    if custom_container_count == -1 and default_container_count == -1:
-        return -1
+        container_type = _mount_all_containers(container_mount_dir, container_root_path)
+        if container_type:
+            logger.info(
+                "Successfully mounted containers (type: %s) from default path %s",
+                container_type,
+                container_root_path,
+            )
+            mounted_something = True
+        else:
+            logger.info(
+                "Failed or no containers found at default containerd path %s",
+                container_root_path,
+            )
+            if log_file:
+                log_entry(log_file, "Error mounting containerd containers")
 
-    if custom_container_count > 0:
-        total_containers += custom_container_count
+        # Try mounting Docker containers from default path
+        container_root_path = os.path.join(path, "var", "lib", "docker")
+        logger.info("Trying default Docker root path: %s", container_root_path)
 
-    if default_container_count > 0:
-        total_containers += default_container_count
+        container_type = _mount_all_containers(container_mount_dir, container_root_path)
+        if container_type:
+            logger.info(
+                "Sucessfully mounted containers (type: %s) from default path %s",
+                container_type,
+                container_root_path,
+            )
+            mounted_something = True
+        else:
+            logger.info(
+                "Failed or no containers found at default Docker path %s",
+                container_root_path,
+            )
+            if log_file:
+                log_entry(log_file, "Error mounting Docker containers")
 
-    return total_containers
-
-
-def get_directory_size(directory: str) -> int:
-    """Calculates the total size of a directory in bytes.
-
-    Args:
-        directory: the path of the directory.
-
-    Returns:
-        The total size of the directory in bytes, or zero if directory does not exist.
-    """
-    total_size = 0
+    if not mounted_something:
+        logger.warning("Failed to mount any containers using available paths")
+        return []
 
     try:
-        for root, dirs, files in os.walk(directory):
-            for file_name in files:
-                file_path = os.path.join(root, file_name)
-                try:
-                    total_size += os.path.getsize(file_path)
-                except OSError:
-                    print(f"Unable to get size of {file_path}")
-                    continue
-        return total_size
+        mounted_dirs = os.listdir(container_mount_dir)
+        logger.info(
+            "Found directories in mount point %s: %d",
+            container_mount_dir,
+            len(mounted_dirs),
+        )
+        return mounted_dirs
     except FileNotFoundError:
-        print(f"Directory {directory} not found")
-        return 0
-    except PermissionError:
-        print(f"Permission denied for directory {directory}")
-        return 0
-
-
-def create_disk_image(path: str, volume_name: str, size: int) -> None:
-    """Creates a disk image and formats to EXT4.
-
-    Args:
-        path: Path of the disk to be created.
-        volume_name: Volume name to set for the disk.
-        size: Size of the disk in MB.
-
-    Returns:
-        The path of the disk image, or None.
-    """
-    command = f"dd if=/dev/zero of={path} bs=1M count={size} status=none"
-    subprocess.run(command, check=False, shell=True, capture_output=True)
-
-    command = f"mkfs.ext4 -q -L {volume_name} {path}"
-    subprocess.run(command, check=False, shell=True, capture_output=True)
-
-    return path
+        logger.error(
+            "Container mount directory %s not found after mount attempts.",
+            container_mount_dir,
+        )
+        return []
+    except Exception as e:
+        logger.error(
+            "Error listing directory %s: %s", container_mount_dir, e, exc_info=True
+        )
+        return []
