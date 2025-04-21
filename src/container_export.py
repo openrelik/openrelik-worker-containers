@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Exports container to a tar.gz file."""
+"""Exports container to a `.zip` archive."""
 
 import logging
 import os
