@@ -45,7 +45,7 @@ TASK_NAME = "openrelik-worker-containers.tasks.container_export"
 # Task metadata for registration in the core system.
 TASK_METADATA = {
     "display_name": "ContainerExplorer: Container Export",
-    "description": "Export container to a tar.gz file.",
+    "description": "Export container to a zip file.",
     "task_config": [
         {
             "name": "container_id",
@@ -77,8 +77,10 @@ def _unmount(mount_point: str, log_file: Optional[OutputFile] = None) -> None:
         if process.returncode == 0:
             logger.info("Successfully unmounted: %s", mount_point)
         else:
-            message = (f"Failed to unmount: {mount_point}. Return code: {process.returncode}, "
-                       f"Stderr: {process.stderr.strip()}")
+            message = (
+                f"Failed to unmount: {mount_point}. Return code: {process.returncode}, "
+                f"Stderr: {process.stderr.strip()}"
+            )
             logger.error(message)
             if log_file:
                 log_entry(log_file, message)
@@ -94,6 +96,7 @@ def _unmount(mount_point: str, log_file: Optional[OutputFile] = None) -> None:
             )
 
     return None
+
 
 def export_container(
     input_file: OutputFile,
@@ -328,7 +331,7 @@ def container_export(
     workflow_id: str = None,
     task_config: dict = None,
 ) -> str:
-    """Export containers as raw disk images.
+    """Export containers as zip files.
 
     Args:
         pipe_result: Base64-encoded result from the previous Celery task, if any.
