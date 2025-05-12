@@ -4,10 +4,23 @@ OpenRelik Containers Worker is responsible for analyzing disk images containing 
 
 ## Features
 
-- Lists containers found within supported disk images.
-- Shows containers drift.
-- Export specific files and directories from container filesystems.
-- Exports container filesystem as `.zip` archives.
+- Lists Containers:
+  - Discovers Docker and containerd containers located on disk.
+  - Uses default storage paths (`/var/lib/docker` or `/var/lib/containerd`) by default.
+  - Allows specifying custom container root directories (e.g., `/data/containers/docker/`).
+
+- Show Container Drift:
+  - Detects modifications made to running containers.
+  - Identifies changes such as configuration alterations, malware additions, or file deletions.
+
+- Export Container Files:
+  - Specific Files/Directories: Exports designated files or folders from a container for use by other OpenRelik workers.
+
+- Filesystem Archive Functionality:
+  - Exports the complete container filesystem as a `.zip` archive for OpenRelik processing.
+  - Processes only the first disk if multiple are provided as input due to unique container IDs.
+  - The export timestamp is recorded as the filesystem birth timestamp within the archive.
+
 
 ## Prerequisites
 
