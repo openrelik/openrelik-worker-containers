@@ -97,10 +97,10 @@ def mount_disk(image_path: str, mount_point: str) -> str:
         return None
 
 
-def _mount_container(
+def _mount_containerd_container(
     container_id: str, container_root_dir: str, container_mount_dir: str
-) -> str:
-    """Mounts specified container ID and returns the container mount point.
+) -> str | None:
+    """Mounts specified containerd container and returns the container mount point.
 
     Args:
         container_id: ID of the container to be mounted.
@@ -110,14 +110,6 @@ def _mount_container(
     Returns:
         Path where container is mounted or None.
     """
-    if not os.path.exists(container_root_dir):
-        logger.debug(
-            "Container root directory %s does not exist, skipping mount attempt.",
-            container_root_dir,
-        )
-        return None
-
-    # Try mounting as containerd container
     containerd_mount_command = [
         CE_BINARY,
         "--containerd-root",
@@ -144,7 +136,7 @@ def _mount_container(
         )
         if process.returncode == 0:
             logger.info(
-                "Succesffully mounted containerd container %s at %s",
+                "Successfully mounted containerd container %s at %s",
                 container_id,
                 container_mount_dir,
             )
@@ -171,7 +163,22 @@ def _mount_container(
             exc_info=True,
         )
 
-    # Try mounting as Docker container
+    return None
+
+
+def _mount_docker_container(
+    container_id: str, container_root_dir: str, container_mount_dir: str
+) -> str | None:
+    """Mounts specified containerd container and returns the container mount point.
+
+    Args:
+        container_id: ID of the container to be mounted.
+        container_root_dir: Absolute path of container root.
+        container_mount_dir: Path to mount container.
+
+    Returns:
+        Path where container is mounted or None.
+    """
     docker_mount_command = [
         CE_BINARY,
         "--docker-managed",
@@ -212,14 +219,12 @@ def _mount_container(
                 process.returncode,
                 process.stderr.strip(),
             )
-            return None
     except subprocess.TimeoutExpired:
         logger.error(
             "Timeout expired while mounting Docker container %s from %s",
             container_id,
             container_root_dir,
         )
-        return None
     except Exception as e:
         logger.error(
             "Exception occurred while mounting Docker container %s from %s: %s",
@@ -228,7 +233,45 @@ def _mount_container(
             e,
             exc_info=True,
         )
+
+    return None
+
+
+def _mount_container(
+    container_id: str, container_root_dir: str, container_mount_dir: str
+) -> str | None:
+    """Mounts specified container ID and returns the container mount point.
+
+    Args:
+        container_id: ID of the container to be mounted.
+        container_root_dir: Absolute path of container root.
+        container_mount_dir: Path to mount container.
+
+    Returns:
+        Path where container is mounted or None.
+    """
+    if not os.path.exists(container_root_dir):
+        logger.debug(
+            "Container root directory %s does not exist, skipping mount attempt.",
+            container_root_dir,
+        )
         return None
+
+    # Try mounting as containerd container
+    returned_container_mount_dir = _mount_containerd_container(
+        container_id, container_root_dir, container_mount_dir
+    )
+    if returned_container_mount_dir:
+        return returned_container_mount_dir
+
+    # Try mounting as Docker container
+    returned_container_mount_dir = _mount_docker_container(
+        container_id, container_root_dir, container_mount_dir
+    )
+    if returned_container_mount_dir:
+        return returned_container_mount_dir
+
+    return None
 
 
 def mount_container(
@@ -299,23 +342,18 @@ def mount_container(
     return None
 
 
-def _mount_all_containers(
+def _mount_all_containerd_containers(
     container_mount_dir: str, container_root_dir: str
 ) -> str | None:
-    """Mounts all containers and returns the list of containers.
+    """Mounts all containerd containers and returns container type.
 
     Args:
         container_mount_dir: Root directory where containers will be mounted under subdirectories.
         container_root_dir: Container root directory.
-    """
-    if not os.path.exists(container_root_dir):
-        logger.debug(
-            "Container root directory %s does not exist, skipping mount-all attempt.",
-            container_root_dir,
-        )
-        return None
 
-    # Try mounting as containerd container
+    Returns:
+        "containerd" if successful else None.
+    """
     containerd_mount_command = [
         CE_BINARY,
         "--support-container-data",
@@ -365,7 +403,21 @@ def _mount_all_containers(
             exc_info=True,
         )
 
-    # Try mounting as Docker container
+    return None
+
+
+def _mount_all_docker_containers(
+    container_mount_dir: str, container_root_dir: str
+) -> str | None:
+    """Mounts all Docker containers and returns container type.
+
+    Args:
+        container_mount_dir: Root directory where containers will be mounted under subdirectories.
+        container_root_dir: Container root directory.
+
+    Returns:
+        "docker" if successful else None.
+    """
     docker_mount_command = [
         CE_BINARY,
         "--docker-managed",
@@ -413,6 +465,39 @@ def _mount_all_containers(
             e,
             exc_info=True,
         )
+
+    return None
+
+
+def _mount_all_containers(
+    container_mount_dir: str, container_root_dir: str
+) -> str | None:
+    """Mounts all containers and returns the list of containers.
+
+    Args:
+        container_mount_dir: Root directory where containers will be mounted under subdirectories.
+        container_root_dir: Container root directory.
+    """
+    if not os.path.exists(container_root_dir):
+        logger.debug(
+            "Container root directory %s does not exist, skipping mount-all attempt.",
+            container_root_dir,
+        )
+        return None
+
+    # Try mounting as containerd container
+    returned_container_type = _mount_all_containerd_containers(
+        container_mount_dir, container_root_dir
+    )
+    if returned_container_type:
+        return returned_container_type
+
+    # Try mounting as Docker container
+    returned_container_type = _mount_all_docker_containers(
+        container_mount_dir, container_root_dir
+    )
+    if returned_container_type:
+        return returned_container_type
 
     return None
 
