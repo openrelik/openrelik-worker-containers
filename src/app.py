@@ -25,5 +25,5 @@ REDIS_URL = os.getenv("REDIS_URL")
 celery = Celery(
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["src.container_drift", "src.container_list", "src.container_file_extract"],
+    include=["src.container_drift", "src.container_list", "src.container_file_extract", "src.container_export"],
 )

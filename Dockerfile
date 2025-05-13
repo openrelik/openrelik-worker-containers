@@ -1,5 +1,5 @@
 # Use the official Docker Hub Ubuntu base image
-FROM ubuntu:24.04
+FROM --platform=linux/amd64 ubuntu:24.04 AS ubuntu_2404_amd64
 
 # Choose what version of Plaso to use.
 ARG PPA_TRACK=stable
