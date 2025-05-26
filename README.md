@@ -1,3 +1,5 @@
+[![codecov](https://codecov.io/github/openrelik/openrelik-worker-containers/graph/badge.svg?token=TMSHQ9KNO5)](https://codecov.io/github/openrelik/openrelik-worker-containers)
+
 # OpenRelik worker for Containers
 
 OpenRelik Containers Worker is responsible for analyzing disk images containing containerd or Docker containers. It receives tasks via Celery to analyze disk images or specific container IDs found within those images.
