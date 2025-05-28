@@ -16,11 +16,14 @@ OpenRelik Containers Worker is responsible for analyzing disk images containing 
 - Export Container Files:
   - Specific Files/Directories: Exports designated files or folders from a container for use by other OpenRelik workers.
 
-- Filesystem Archive Functionality:
-  - Exports the complete container filesystem as a `.zip` archive for OpenRelik processing.
-  - Processes only the first disk if multiple are provided as input due to unique container IDs.
-  - The export timestamp is recorded as the filesystem birth timestamp within the archive.
-
+- Container Export Functionality:
+  - Exports complete container filesystems as `.tar.gz` archives or `.img` disk images for OpenRelik processing.
+  - Filters container exports based on labels (e.g., `io.kubernetes.pod.namespace=myapp`).
+  - Excludes containers within the `kube-system` namespace.
+  - Processes multiple input disks.
+  - Automatically detects containers across all available namespaces.
+  - Records the export time as the filesystem birth timestamp in the archive.
+  - Without specific configuration, defaults to exporting all containers as disk images.
 
 ## Prerequisites
 
@@ -123,3 +126,19 @@ openrelik-worker-containers:
         - ./data:/usr/share/openrelik/data
       command: "celery --app=src.app worker --task-events --concurrency=2 --loglevel=DEBUG -Q openrelik-worker-containers"
     ```
+
+### Updating Container Explorer Version
+
+The OpenRelik container worker currently uses Container Explorer version 0.4.0. To use a different version with OpenRelik, modify the `CE_VER` variable in the `setup.sh` script.
+
+```bash
+Example:
+set -e
+
+SCRIPTNAME=$(basename "$0")
+
+CE_VER=0.4.0
+CE_PKG=container-explorer.tar.gz
+```
+
+**Note**: The minimum required version of Container Explorer for the OpenRelik container worker is 0.4.0.

@@ -40,29 +40,43 @@ TASK_NAME = "openrelik-worker-containers.tasks.container_export"
 # Task metadata for registration in the core system.
 TASK_METADATA = {
     "display_name": "Containers: Export Container",
-    "description": "Export container to a raw disk image or archive.",
+    "description": (
+        "Exports a container to either a raw disk image or an archive. If no container "
+        "ID is specified, all containers will be exported. By default, the export "
+        "format is an image unless other options are provided. Containers residing in "
+        "the Kubernetes namespace `kube-system` are automatically excluded from the "
+        "export process."
+    ),
     "task_config": [
         {
             "name": "container_id",
             "label": "Container ID to export",
-            "description": "Comma separated container IDs to export",
+            "description": (
+                "Specify the comma-separated IDs of containers for export. If this is"
+                " left blank, all containers will be exported."
+            ),
             "type": "Text",
             "required": False,
         },
         {
             "name": "export_image",
-            "label": "Export container as disk image",
+            "label": "Export container as disk image.",
+            "description": "Create a disk image from a container.",
             "type": "checkbox",
         },
         {
             "name": "export_archive",
-            "label": "Export container as archive",
+            "label": "Export container as archive.",
+            "description": "Create a archive (tar.gz) from a container.",
             "type": "checkbox",
         },
         {
             "name": "filter",
-            "label": "Filter containers using container labels",
-            "description": "Filter containers using key=value container labels. e.g. io.kubernetes.pod.namespace=appspace",
+            "label": "Filter containers using container labels.",
+            "description": (
+                "To filter and export containers, use key-value container labels in the"
+                " format of `key=value`. For example: `io.kubernetes.pod.namespace=appspace`."
+            ),
             "type": "Text",
         },
     ],
