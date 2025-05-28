@@ -96,6 +96,45 @@ def mount_disk(image_path: str, mount_point: str) -> str:
         )
         return None
 
+def unmount_disk(mount_point: str, log_file: Optional[OutputFile] = None) -> None:
+    """Safely unmounts a given mount points."""
+    if not mount_point or not os.path.ismount(mount_point):
+        logger.debug("Skipping unmount for non-mount point %s", mount_point)
+        return None
+
+    logger.info("Attempting to unmount: %s", mount_point)
+    unmount_command = ["umount", mount_point]
+    try:
+        process = subprocess.run(
+            unmount_command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=60,
+        )
+        if process.returncode == 0:
+            logger.info("Successfully unmounted: %s", mount_point)
+        else:
+            message = (
+                f"Failed to unmount: {mount_point}. Return code: {process.returncode}, "
+                f"Stderr: {process.stderr.strip()}"
+            )
+            logger.error(message)
+            if log_file:
+                log_entry(log_file, message)
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout expired while unmounting: %s", mount_point)
+    except Exception as e:
+        logger.error(
+            "Exception occurred while unmounting: %s: %s", mount_point, e, exc_info=True
+        )
+        if log_file:
+            log_entry(
+                log_file, f"Exception occurred while unmounting: {mount_point}: {e}"
+            )
+
+    return None
+
 
 def _mount_containerd_container(
     container_id: str, container_root_dir: str, container_mount_dir: str

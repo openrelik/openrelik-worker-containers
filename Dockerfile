@@ -1,7 +1,6 @@
 # Use the official Docker Hub Ubuntu base image
 FROM --platform=linux/amd64 ubuntu:24.04 AS ubuntu_2404_amd64
 
-# Choose what version of Plaso to use.
 ARG PPA_TRACK=stable
 
 # Prevent needing to configure debian packages, stopping the setup of
@@ -16,9 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Install latest release of container explorer
-RUN wget -O /tmp/container-explorer-setup.sh https://raw.githubusercontent.com/google/container-explorer/main/script/setup.sh
-RUN chmod +x /tmp/container-explorer-setup.sh
-RUN /tmp/container-explorer-setup.sh install
+COPY ./setup.sh ./setup.sh
+RUN chmod +x ./setup.sh
+RUN ./setup.sh install
 
 # Configure poetry
 ENV POETRY_NO_INTERACTION=1 \
