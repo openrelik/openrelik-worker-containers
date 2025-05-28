@@ -59,6 +59,12 @@ TASK_METADATA = {
             "label": "Export container as archive",
             "type": "checkbox",
         },
+        {
+            "name": "filter",
+            "label": "Filter containers using container labels",
+            "description": "Filter containers using key=value container labels. e.g. io.kubernetes.pod.namespace=appspace",
+            "type": "Text",
+        },
     ],
 }
 
@@ -187,6 +193,11 @@ def export_all_containers(
     # Using default if user did not selection an export type.
     if "--image" not in export_command and "--archive" not in export_command:
         export_command.append("--image")
+
+    # Filter container to export using container label key-value pairs.
+    filter = task_config.get("filter")
+    if filter:
+        export_command.extend(["--filter", filter])
 
     output_files = []
 
