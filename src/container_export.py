@@ -547,7 +547,7 @@ def container_export(
     return create_task_result(
         workflow_id=workflow_id,
         output_files=final_output_files,
-        task_logs=log_files,
+        task_files=log_files,
         task_report=report.to_dict(),
     )
 
