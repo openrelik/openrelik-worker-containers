@@ -490,18 +490,19 @@ files = [
 
 [[package]]
 name = "openrelik-worker-common"
-version = "0.12.0"
+version = "0.12.1"
 description = "Common utilities for OpenRelik workers"
 optional = false
 python-versions = "<4.0,>=3.10"
 groups = ["main"]
 files = [
-    {file = "openrelik_worker_common-0.12.0-py3-none-any.whl", hash = "sha256:d4190a8c193d3919e00b3255d6113b6832cf802286564e73e548b486529fb0a9"},
-    {file = "openrelik_worker_common-0.12.0.tar.gz", hash = "sha256:78629182cfaabb93ca246f4b13a657b9df0ce3c79c5575221f4f4a1cc86e81a4"},
+    {file = "openrelik_worker_common-0.12.1-py3-none-any.whl", hash = "sha256:f878ebd6d1bc49482239075d11164b9931daac98a2ac86006b350d6c5901561e"},
+    {file = "openrelik_worker_common-0.12.1.tar.gz", hash = "sha256:e14c2c7f8daf20532e104a09282ffc4c5d70b93dfb5649b02fe498d449b36598"},
 ]
 
 [package.dependencies]
 debugpy = ">=1.8.6,<2.0.0"
+redis = ">=5.2.1,<6.0.0"
 
 [[package]]
 name = "packaging"
@@ -545,6 +546,24 @@ files = [
 
 [package.dependencies]
 wcwidth = "*"
+
+[[package]]
+name = "pyjwt"
+version = "2.9.0"
+description = "JSON Web Token implementation in Python"
+optional = false
+python-versions = ">=3.8"
+groups = ["main", "test"]
+files = [
+    {file = "PyJWT-2.9.0-py3-none-any.whl", hash = "sha256:3b02fb0f44517787776cf48f2ae25d8e14f300e6d7545a4315cee571a415e850"},
+    {file = "pyjwt-2.9.0.tar.gz", hash = "sha256:7e1e5b56cc735432a7369cbfa0efe50fa113ebecdc04ae6922deba8b84582d0c"},
+]
+
+[package.extras]
+crypto = ["cryptography (>=3.4.0)"]
+dev = ["coverage[toml] (==5.0.4)", "cryptography (>=3.4.0)", "pre-commit", "pytest (>=6.0.0,<7.0.0)", "sphinx", "sphinx-rtd-theme", "zope.interface"]
+docs = ["sphinx", "sphinx-rtd-theme", "zope.interface"]
+tests = ["coverage[toml] (==5.0.4)", "pytest (>=6.0.0,<7.0.0)"]
 
 [[package]]
 name = "pytest"
@@ -605,18 +624,19 @@ six = ">=1.5"
 
 [[package]]
 name = "redis"
-version = "5.2.0"
+version = "5.3.0"
 description = "Python client for Redis database and key-value store"
 optional = false
 python-versions = ">=3.8"
 groups = ["main", "test"]
 files = [
-    {file = "redis-5.2.0-py3-none-any.whl", hash = "sha256:ae174f2bb3b1bf2b09d54bf3e51fbc1469cf6c10aa03e21141f51969801a7897"},
-    {file = "redis-5.2.0.tar.gz", hash = "sha256:0b1087665a771b1ff2e003aa5bdd354f15a70c9e25d5a7dbf9c722c16528a7b0"},
+    {file = "redis-5.3.0-py3-none-any.whl", hash = "sha256:f1deeca1ea2ef25c1e4e46b07f4ea1275140526b1feea4c6459c0ec27a10ef83"},
+    {file = "redis-5.3.0.tar.gz", hash = "sha256:8d69d2dde11a12dc85d0dbf5c45577a5af048e2456f7077d87ad35c1c81c310e"},
 ]
 
 [package.dependencies]
 async-timeout = {version = ">=4.0.3", markers = "python_full_version < \"3.11.3\""}
+PyJWT = ">=2.9.0,<2.10.0"
 
 [package.extras]
 hiredis = ["hiredis (>=3.0.0)"]
