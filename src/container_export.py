@@ -34,6 +34,8 @@ from .utils import CE_BINARY, log_entry
 # Set up logging
 logger = logging.getLogger(__name__)
 
+# Container worker expects input file is a disk image with one of the following file extensions
+# specified in "filenames". Input files without expected file extensions are not processed.
 COMPATIBLE_INPUTS: Dict[str, Any] = {
     "data_types": [],
     "mime_types": [],
@@ -334,8 +336,12 @@ def container_root_exists(mountpoint: str) -> bool:
         # Containerd and Docker default root directories are /var/lib/containerd and /var/lib/docker
         # Handling edge case where /var is a dedicated Linux partition.
         if f"lib/{container_root_dirname}" in container_root_path:
-            return True
-
+            container_root_files = os.listdir(container_root_path)
+            if (
+                "containers" in container_root_files
+                or "io.containerd.content.v1.content" in container_root_files
+            ):
+                return True
     return False
 
 
@@ -402,41 +408,15 @@ def container_export(
 
     # Process each input file.
     for input_file in input_files:
-        input_file.get("")
-
         logger.info("Processing disk %s", input_file.get("id"))
-
-        temp_dir: str = os.path.join(output_path, f"tmp{uuid4().hex[:6]}")
-        os.makedirs(temp_dir, exist_ok=True)
 
         if container_ids:
             logger.info("Processing container IDs %s", ",".join(container_ids))
         else:
             logger.info("Processing all containers")
 
-        disk_name: str = os.path.basename(input_file.get("path", ""))
-        disk_image_path: str = os.path.join(temp_dir, disk_name)
-
         try:
-            os.link(input_file.get("path"), disk_image_path)
-            logger.debug(
-                "Created disk link %s to %s", input_file.get("path"), disk_image_path
-            )
-        except OSError as err:
-            logger.error(
-                "Unable to link input file %s to %s: %s",
-                input_file.get("path"),
-                disk_image_path,
-                str(err),
-            )
-            log_entry(
-                log_file,
-                f"Error preparing {input_file.get('id')} for mounting. Skipping",
-            )
-            continue
-
-        try:
-            bd = BlockDevice(disk_image_path)
+            bd = BlockDevice(input_file.get("path"))
             bd.setup()
             mountpoints: List[str] = bd.mount()
 
@@ -463,6 +443,11 @@ def container_export(
                     logger.debug(
                         "Container root does not exist in mountpoint %s. Skipping...",
                         mountpoint,
+                    )
+
+                    log_entry(
+                        log_file,
+                        f"Default container root directories do not exist in {input_file.get('id')}",
                     )
 
                     continue
@@ -534,11 +519,6 @@ def container_export(
         finally:
             logger.debug("Unmounting disk %s", input_file.get("id"))
             bd.umount()
-
-            # Clean up
-            if temp_dir:
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
 
     logger.debug("Completed processing %d input disks", len(input_files))
 

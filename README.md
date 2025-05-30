@@ -2,7 +2,12 @@
 
 # OpenRelik worker for Containers
 
-OpenRelik Containers Worker is responsible for analyzing disk images containing containerd or Docker containers. It receives tasks via Celery to analyze disk images or specific container IDs found within those images.
+The OpenRelik Containers Worker analyzes disk images for containerd or Docker containers. It gets
+tasks through Celery to examine either entire disk images or specific container IDs found within
+them.
+
+The container worker only processes input files that are disk images with one of these extensions:
+.raw, .img, .dd, .qcow, .qcow2, or .qcow3. Files without these extensions won't be processed.
 
 ## Features
 
