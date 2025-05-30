@@ -21,7 +21,7 @@ import unittest
 from unittest.mock import patch, mock_open, MagicMock
 
 from src.container_list import container_list
-from src.container_list import read_container_explorer_output
+from src.container_list import _read_json_file
 
 
 class TestContainerListTask(unittest.TestCase):
@@ -56,13 +56,13 @@ class TestContainerListTask(unittest.TestCase):
 
         mock_open_file = mock_open(read_data='[{"container": "test"}]')
         with patch("builtins.open", mock_open_file):
-            result = read_container_explorer_output(self.container_output_file)
+            result = _read_json_file(self.container_output_file)
             self.assertEqual(result, [{"container": "test"}])
 
     def test_read_container_explorer_output_file_not_exist(self):
         """Tests read_container_explorer_output for failure."""
 
-        result = read_container_explorer_output("/tmp/non/existent/path")
+        result = _read_json_file("/tmp/non/existent/path")
         self.assertIsNone(result)
 
     @patch("src.container_drift.get_input_files")
