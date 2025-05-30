@@ -23,10 +23,14 @@ import subprocess
 from typing import Any, List, Dict
 from uuid import uuid4
 
-
 from openrelik_worker_common.file_utils import create_output_file
 from openrelik_worker_common.file_utils import OutputFile
 from openrelik_worker_common.mount_utils import BlockDevice
+from openrelik_worker_common.reporting import (
+    MarkdownDocument,
+    MarkdownDocumentSection,
+    MarkdownTable,
+)
 from openrelik_worker_common.reporting import Report
 from openrelik_worker_common.task_utils import create_task_result
 from openrelik_worker_common.task_utils import get_input_files
@@ -59,7 +63,7 @@ def container_list(
     workflow_id: str = "",
     task_config: Dict[str, Any] = {},
 ) -> str:
-    """Run Container Explorer on input files.
+    """List containers on a disk.
 
     Args:
         pipe_result: Base64-encoded result from the previous Celery task, if any.
@@ -110,7 +114,7 @@ def container_list(
         input_file_path: str = input_file.get("path", "")
 
         try:
-            bd = BlockDevice(input_file_path, max_mountpath_size=8)
+            bd = BlockDevice(input_file_path, max_mountpath_size=11)
             bd.setup()
 
             mountpoints: List[str] = bd.mount()
@@ -141,16 +145,15 @@ def container_list(
                     )
                     continue
 
-                # TODO: Start implementing container task here.
                 output_file: OutputFile | None = list_containers(
                     input_file, output_path, log_file, mountpoint
                 )
                 if not output_file:
                     logger.debug("No containers on disk %s", input_file_id)
+                    log_entry(log_file, f"No containers in disk {input_file_id}")
                     continue
 
                 output_files.append(output_file.to_dict())
-                # End implementing container task here.
 
         except RuntimeError as e:
             logger.error(
@@ -162,7 +165,10 @@ def container_list(
 
         logger.debug("Completed processing %d input disks", len(input_files))
 
-    report: Report = create_task_report(output_files)
+    markdown_report: OutputFile = create_markdown_report(output_path, output_files)
+    output_files.append(markdown_report.to_dict())
+
+    report: Report = create_task_report(output_files, markdown_report.path)
 
     return create_task_result(
         workflow_id=workflow_id,
@@ -172,29 +178,79 @@ def container_list(
     )
 
 
-def create_task_report(output_files: List[Dict]) -> Report:
+def create_task_report(output_files: List[Dict], content_filepath: str = "") -> Report:
     """Create and return container list report."""
-    report: Report = Report("Container List Report")
+    logger.debug("Creating task report")
 
-    # TODO(rmaskey): Add report content.
+    report: Report = Report("Container List Report")
+    summary: MarkdownDocumentSection = report.add_section()
+
+    if content_filepath:
+        with open(content_filepath, "r", encoding="utf-8") as fh:
+            summary.add_paragraph(fh.read())
 
     return report
 
 
-def create_container_list_report(
-    output_path: str, output_files: List[Dict[str, Any]]
-) -> OutputFile:
+def create_markdown_report(output_path: str, output_files: List[Dict]) -> OutputFile:
     """Create and return a markdown container list."""
+    logger.debug("Creating list container markdown report")
+
     markdown_output_file: OutputFile = create_output_file(
         output_path, display_name="container_list", extension="md"
     )
+
+    mdreport = MarkdownDocument(title="Container Listing")
+    table_section: MarkdownDocumentSection = mdreport.add_section()
+
+    report_table = MarkdownTable(
+        columns=[
+            "Namespace",
+            "ID",
+            "Hostname",
+            "Image",
+            "Container Runtime",
+            "Created",
+            "Updated",
+        ]
+    )
+
+    for output_file in output_files:
+        containers_info: List[Dict[str, Any]] = _read_json_file(
+            output_file.get("path", "")
+        )
+        for container_info in containers_info:
+            _namespace = container_info.get("Namespace", "")
+            _id: str = container_info.get("ID", "")
+            _hostname: str = container_info.get("Hostname", "")
+            _image: str = container_info.get("Image", "")
+            _container_runtime: str = container_info.get("ContainerType", "")
+            _created: str = container_info.get("CreatedAt", "")
+            _updated: str = container_info.get("UpdatedAt", "")
+
+            report_table.add_row(
+                row_data=[
+                    _namespace,
+                    _id,
+                    _hostname,
+                    _image,
+                    _container_runtime,
+                    _created,
+                    _updated,
+                ]
+            )
+
+    table_section.add_table(report_table)
+
+    with open(markdown_output_file.path, "w", encoding="utf-8") as fh:
+        fh.write(mdreport.to_markdown())
 
     return markdown_output_file
 
 
 def list_containers(
     input_file: Dict[str, Any], output_path: str, log_file: OutputFile, mountpoint: str
-) -> OutputFile | None:
+) -> OutputFile:
     """Returns an output file with container list information."""
     temp_dir: str = os.path.join(output_path, uuid4().hex)
     os.mkdir(temp_dir)

@@ -663,12 +663,14 @@ def mount_all_containers(
         return []
 
 
-def _find_directory(root_dir: str, find_dirname: str) -> str:
+def _find_directory(root_dir: str, find_dirname: str) -> List[str]:
     """Find a directory name in the specified path."""
+    potential_root_dirs: List[str] = []
+
     for dirpath, dirnames, _ in os.walk(root_dir):
         if find_dirname in dirnames:
-            return os.path.join(dirpath, find_dirname)
-    return ""
+            potential_root_dirs.append(os.path.join(dirpath, find_dirname))
+    return potential_root_dirs
 
 
 def container_root_exists(mountpoint: str) -> bool:
@@ -676,15 +678,21 @@ def container_root_exists(mountpoint: str) -> bool:
     container_root_dirnames: List[str] = ["docker", "containerd"]
 
     for container_root_dirname in container_root_dirnames:
-        container_root_path: str = _find_directory(mountpoint, container_root_dirname)
+        container_root_paths: List[str] = _find_directory(
+            mountpoint, container_root_dirname
+        )
 
         # Containerd and Docker default root directories are /var/lib/containerd and /var/lib/docker
         # Handling edge case where /var is a dedicated Linux partition.
-        if f"lib/{container_root_dirname}" in container_root_path:
-            container_root_files = os.listdir(container_root_path)
-            if (
-                "containers" in container_root_files
-                or "io.containerd.content.v1.content" in container_root_files
-            ):
-                return True
+        for container_root_path in container_root_paths:
+            if f"lib/{container_root_dirname}" in container_root_path:
+                container_root_files: List[str] = os.listdir(container_root_path)
+                if (
+                    "containers" in container_root_files
+                    or "io.containerd.content.v1.content" in container_root_files
+                ):
+                    logger.debug(
+                        "Container root directory identified %s", container_root_path
+                    )
+                    return True
     return False
