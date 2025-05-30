@@ -12,66 +12,52 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""List containers on disk."""
+
+import logging
 import json
 import os
 import shutil
 import subprocess
 
-from typing import List, Dict
+from typing import Any, List, Dict
 from uuid import uuid4
 
+
 from openrelik_worker_common.file_utils import create_output_file
-from openrelik_worker_common.task_utils import (
-    create_task_result,
-    get_input_files,
-)
+from openrelik_worker_common.file_utils import OutputFile
+from openrelik_worker_common.mount_utils import BlockDevice
+from openrelik_worker_common.reporting import Report
+from openrelik_worker_common.task_utils import create_task_result
+from openrelik_worker_common.task_utils import get_input_files
 
 from .app import celery
+from .utils import CE_BINARY
+from .utils import COMPATIBLE_INPUTS
+from .utils import container_root_exists
+from .utils import log_entry
+
+# Set up logging
+logger: logging.Logger = logging.getLogger(__name__)
 
 # Task name used to register and route the task to the correct queue.
 TASK_NAME = "openrelik-worker-containers.tasks.container_list"
 
 # Task metadata for registration in the core system.
-TASK_METADATA = {
+TASK_METADATA: Dict[str, Any] = {
     "display_name": "ContainerExplorer: List Containers",
     "description": "List containerd and Docker containers",
 }
-
-CE_BINARY = "/opt/container-explorer/bin/ce"
-DISK_MOUNT_DIR = "/mnt"
-CONTAINERD_ROOT_DIR = os.path.join(DISK_MOUNT_DIR, "var", "lib", "containerd")
-DOCKER_ROOT_DIR = os.path.join(DISK_MOUNT_DIR, "var", "lib", "docker")
-
-
-def read_container_explorer_output(path: str) -> List[Dict]:
-    """Reads Container Explorer's JSON output and returns list.
-
-    Args:
-        path: JSON output file produced by Container Explorer.
-
-    Returns:
-        Returns the JSON output file produced by Container Explorer.
-    """
-    if not os.path.exists(path):
-        return None
-
-    data = None
-    with open(path, "r", encoding="utf-8") as file_handler:
-        try:
-            data = json.loads(file_handler.read())
-        except (FileNotFoundError, json.decoder.JSONDecodeError):
-            return None
-    return data
 
 
 @celery.task(bind=True, name=TASK_NAME, metadata=TASK_METADATA)
 def container_list(
     self,
-    pipe_result: str = None,
-    input_files: list = None,
-    output_path: str = None,
-    workflow_id: str = None,
-    task_config: dict = None,
+    pipe_result: str = "",
+    input_files: List[Dict] = [],
+    output_path: str = "",
+    workflow_id: str = "",
+    task_config: Dict[str, Any] = {},
 ) -> str:
     """Run Container Explorer on input files.
 
@@ -85,169 +71,268 @@ def container_list(
     Returns:
         Base64-encoded dictionary containing task results.
     """
-    input_files = get_input_files(pipe_result, input_files or [])
-    output_files = []
+    task_id: str = self.request.id
+    logger.info(
+        "Starting task (%s) in workflow (%s) to list containers", task_id, workflow_id
+    )
 
-    temp_dir = os.path.join(output_path, uuid4().hex)
-    os.mkdir(temp_dir)
+    input_files = get_input_files(
+        pipe_result, input_files or [], filter=COMPATIBLE_INPUTS
+    )
+    output_files: List[Dict] = []
+
+    # task_files contains dict of OutputFile for local use only.
+    task_files: List[Dict] = []
 
     # Log file to capture logs.
-    log_file = create_output_file(
+    log_file: OutputFile = create_output_file(
         output_path,
         extension="log",
         display_name="container_list",
     )
+    task_files.append(log_file.to_dict())
+
+    if not input_files:
+        logger.warning("No supported input file extensions.")
+        log_entry(log_file, "No supported input file extensions.")
+
+        report: Report = create_task_report(output_files)
+
+        return create_task_result(
+            workflow_id=workflow_id,
+            output_files=output_files,
+            task_files=task_files,
+            task_report=report.to_dict(),
+        )
 
     for input_file in input_files:
-        filename = os.path.basename(input_file.get("path"))
-        disk_image_path = os.path.join(temp_dir, filename)
+        input_file_id: str = input_file.get("id", "")
+        input_file_path: str = input_file.get("path", "")
 
-        os.link(input_file.get("path"), disk_image_path)
+        try:
+            bd = BlockDevice(input_file_path, max_mountpath_size=8)
+            bd.setup()
 
-        mount_command = [
-            "mount",
-            "-o",
-            "ro,noload",
-            disk_image_path,
-            DISK_MOUNT_DIR,
-        ]
+            mountpoints: List[str] = bd.mount()
+            if not mountpoints:
+                logger.info("No mountpoints returned for disk %s", input_file_id)
+                logger.info("Unmounting the disk %s", input_file_id)
 
-        process = subprocess.run(
-            mount_command, capture_output=True, check=False, text=True
-        )
-        if process.returncode != 0:
-            raise RuntimeError(
-                "Error mounting disk image ", input_file.get("path"), process.stdout
-            )
+                bd.umount()
 
-        # Before proceeding further check if container directories exist.
-        if not CONTAINERD_ROOT_DIR and not DOCKER_ROOT_DIR:
-            with open(log_file.path, "a", encoding="utf-8") as log_writer:
-                log_writer.write("Container root directories does not exist")
-                log_writer.write("")
+                # Skipping current input_file.
+                continue
 
-            output_files.append(log_file.to_dict())
-
-            unmount_command = [
-                "umount",
-                DISK_MOUNT_DIR,
-            ]
-            subprocess.run(unmount_command, capture_output=False, check=True)
-
-            return create_task_result(
-                output_files=output_files,
-                workflow_id=workflow_id,
-            )
-
-        # container_info holds containers information.
-        container_info = []
-
-        # Listing containerd containers
-        if os.path.exists(CONTAINERD_ROOT_DIR):
-            containerd_output_file = create_output_file(
-                output_path,
-                display_name="containerd_list",
-                extension="json",
-            )
-
-            containerd_command = [
-                CE_BINARY,
-                "--image-root",
-                DISK_MOUNT_DIR,
-                "--output-file",
-                containerd_output_file.path,
-                "--output",
-                "json",
-                "list",
-                "containers",
-            ]
-
-            process = subprocess.run(
-                containerd_command, capture_output=True, check=False, text=True
-            )
-            if process.returncode == 0:
-                containerd_output = read_container_explorer_output(
-                    containerd_output_file.path
+            # Process each mountpoint looking for containers
+            for mountpoint in mountpoints:
+                logger.debug(
+                    "Processing mountpoint %s for disk %s", mountpoint, input_file_id
                 )
-                if containerd_output:
-                    container_info.extend(containerd_output)
-            else:
-                with open(log_file.path, "a", encoding="utf-8") as log_writer:
-                    log_writer.write(
-                        f"Error listing containerd containers. {process.stdout}"
+
+                # Only process the mountpoint containing valid containerd or Docker root directory.
+                if not container_root_exists(mountpoint):
+                    logger.debug(
+                        "Container root directory does not exist in mount point %s",
+                        mountpoint,
                     )
-                    log_writer.write("")
-
-        # Listing Docker containers
-        if os.path.exists(DOCKER_ROOT_DIR):
-            docker_output_file = create_output_file(
-                output_path,
-                display_name="docker_list",
-                extension="json",
-            )
-
-            docker_command = [
-                CE_BINARY,
-                "--docker-managed",
-                "--image-root",
-                DISK_MOUNT_DIR,
-                "--output-file",
-                docker_output_file.path,
-                "--output",
-                "json",
-                "list",
-                "containers",
-            ]
-
-            process = subprocess.run(
-                docker_command, capture_output=True, check=False, text=True
-            )
-            if process.returncode == 0:
-                docker_output = read_container_explorer_output(docker_output_file.path)
-                if docker_output:
-                    container_info.extend(docker_output)
-            else:
-                with open(log_file.path, "a", encoding="utf-8") as log_writer:
-                    log_writer.write(
-                        f"Error listing Docker containers. {process.stdout}"
+                    log_entry(
+                        log_file,
+                        f"Container directory not found in disk {input_file_id}",
                     )
-                    log_writer.write("")
+                    continue
 
-        # Clean up
-        unmount_disk = ["umount", DISK_MOUNT_DIR]
-        subprocess.run(unmount_disk, capture_output=False, check=True)
+                # TODO: Start implementing container task here.
+                output_file: OutputFile | None = list_containers(
+                    input_file, output_path, log_file, mountpoint
+                )
+                if not output_file:
+                    logger.debug("No containers on disk %s", input_file_id)
+                    continue
 
-    # Combined containerd and Docker container listing and pretty output.
-    if container_info:
-        combined_output = create_output_file(
-            output_path,
-            display_name="container_list",
-            extension="json",
-        )
+                output_files.append(output_file.to_dict())
+                # End implementing container task here.
 
-        with open(combined_output.path, "w", encoding="utf-8") as file_writer:
-            json.dump(container_info, file_writer, indent=4)
+        except RuntimeError as e:
+            logger.error(
+                "Encountered unexpected error while processing disk %s", input_file_id
+            )
+        finally:
+            logger.debug("Unmounting disk %s", input_file_id)
+            bd.umount()
 
-        output_files.append(combined_output.to_dict())
+        logger.debug("Completed processing %d input disks", len(input_files))
 
-    # Clean disk
-    if temp_dir:
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-
-    if not output_files:
-        with open(log_file.path, "a", encoding="utf-8") as log_writer:
-            log_writer.write("Container listing did not generate output")
-            log_writer.write("")
-
-    # Add log file to output
-    output_files.append(log_file.to_dict())
+    report: Report = create_task_report(output_files)
 
     return create_task_result(
-        output_files=output_files,
         workflow_id=workflow_id,
-        command=(
-            "/opt/container-explorer/bin/ce [--docker-managed] --output json"
-            " --image-root /mnt list containers"
-        ),
+        output_files=output_files,
+        task_files=task_files,
+        task_report=report.to_dict(),
     )
+
+
+def create_task_report(output_files: List[Dict]) -> Report:
+    """Create and return container list report."""
+    report: Report = Report("Container List Report")
+
+    # TODO(rmaskey): Add report content.
+
+    return report
+
+
+def create_container_list_report(
+    output_path: str, output_files: List[Dict[str, Any]]
+) -> OutputFile:
+    """Create and return a markdown container list."""
+    markdown_output_file: OutputFile = create_output_file(
+        output_path, display_name="container_list", extension="md"
+    )
+
+    return markdown_output_file
+
+
+def list_containers(
+    input_file: Dict[str, Any], output_path: str, log_file: OutputFile, mountpoint: str
+) -> OutputFile | None:
+    """Returns an output file with container list information."""
+    temp_dir: str = os.path.join(output_path, uuid4().hex)
+    os.mkdir(temp_dir)
+    logger.debug(
+        "Created temporary directory to store container list output files: %s.",
+        temp_dir,
+    )
+
+    containers_info: List[Dict] = []
+
+    containerd_output_file: OutputFile = create_output_file(
+        temp_dir,
+        display_name="containerd_container_list",
+        extension="json",
+        source_file_id=input_file.get("id"),
+    )
+
+    _list_containerd_containers(mountpoint, containerd_output_file.path)
+
+    containerd_containers_info: List[Dict[str, Any]] = _read_json_file(
+        containerd_output_file.path
+    )
+    if containerd_containers_info:
+        containers_info.extend(containerd_containers_info)
+
+    docker_output_file: OutputFile = create_output_file(
+        temp_dir,
+        display_name="docker_container_list",
+        extension="json",
+        source_file_id=input_file.get("id"),
+    )
+
+    _list_docker_containers(mountpoint, docker_output_file.path)
+
+    docker_containers_info: List[Dict[str, Any]] = _read_json_file(
+        docker_output_file.path
+    )
+    if docker_containers_info:
+        containers_info.extend(docker_containers_info)
+
+    output_file: OutputFile = create_output_file(
+        output_path,
+        display_name="container_list",
+        extension="json",
+        source_file_id=input_file.get("id"),
+    )
+    _write_json_file(output_file.path, containers_info)
+
+    # Cleanup
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+
+    return output_file
+
+
+def _list_containerd_containers(mountpoint: str, container_output_file: str) -> None:
+    """List containerd containers and save to output file."""
+    command: List[str] = [
+        CE_BINARY,
+        "--image-root",
+        mountpoint,
+        "--output-file",
+        container_output_file,
+        "--output",
+        "json",
+        "list",
+        "containers",
+    ]
+
+    try:
+        logger.debug("Running container explorer command: %s", " ".join(command))
+        process: subprocess.CompletedProcess[str] = subprocess.run(
+            command, capture_output=True, check=False, text=True
+        )
+        if process.returncode == 0:
+            logger.debug("Successfully listed containerd containers at %s", mountpoint)
+        else:
+            logger.error(
+                "Container explorer failed listing containers at %s", mountpoint
+            )
+    except subprocess.CalledProcessError as err:
+        logger.debug("Error running container explorer process: %s", str(err))
+
+
+def _list_docker_containers(mountpoint: str, container_output_file: str) -> None:
+    """List Docker containers and save to output file."""
+    command: List[str] = [
+        CE_BINARY,
+        "--docker-managed",
+        "--image-root",
+        mountpoint,
+        "--output-file",
+        container_output_file,
+        "--output",
+        "json",
+        "list",
+        "containers",
+    ]
+
+    try:
+        logger.debug("Running container explorer command: %s", " ".join(command))
+        process: subprocess.CompletedProcess[str] = subprocess.run(
+            command, capture_output=True, check=False, text=True
+        )
+        if process.returncode == 0:
+            logger.debug("Successfully listed Docker containers at %s", mountpoint)
+        else:
+            logger.error(
+                "Container explorer failed listing containers at %s", mountpoint
+            )
+    except subprocess.CalledProcessError as err:
+        logger.debug("Error running container explorer process: %s", str(err))
+
+
+def _read_json_file(path: str) -> List[Dict]:
+    """Reads JSON file.
+
+    Args:
+        path: JSON file.
+
+    Returns:
+        Returns the content of json file.
+    """
+    if not os.path.exists(path):
+        return []
+
+    data: List[Dict] = []
+
+    with open(path, "r", encoding="utf-8") as file_handler:
+        try:
+            data = json.loads(file_handler.read())
+        except (FileNotFoundError, json.decoder.JSONDecodeError):
+            return []
+
+    return data
+
+
+def _write_json_file(path: str, data: List[Dict[str, Any]]) -> None:
+    """Write JSON data."""
+    with open(path, "w", encoding="utf-8") as file_handler:
+        json.dump(data, file_handler, indent=4)

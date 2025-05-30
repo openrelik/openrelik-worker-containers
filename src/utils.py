@@ -18,13 +18,20 @@ import logging
 import os
 import subprocess
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from openrelik_worker_common.file_utils import OutputFile
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 CE_BINARY = "/opt/container-explorer/bin/ce"
+
+# Container worker support inputs.
+COMPATIBLE_INPUTS: Dict[str, Any] = {
+    "data_types": [],
+    "mime_types": [],
+    "filenames": ["*.img", "*.raw", "*.dd", "*.qcow3", "*.qcow2", "*.qcow"],
+}
 
 
 def log_entry(log_file: OutputFile, message: str) -> None:
@@ -95,6 +102,7 @@ def mount_disk(image_path: str, mount_point: str) -> str:
             exc_info=True,
         )
         return None
+
 
 def unmount_disk(mount_point: str, log_file: Optional[OutputFile] = None) -> None:
     """Safely unmounts a given mount points."""
@@ -653,3 +661,30 @@ def mount_all_containers(
             "Error listing directory %s: %s", container_mount_dir, e, exc_info=True
         )
         return []
+
+
+def _find_directory(root_dir: str, find_dirname: str) -> str:
+    """Find a directory name in the specified path."""
+    for dirpath, dirnames, _ in os.walk(root_dir):
+        if find_dirname in dirnames:
+            return os.path.join(dirpath, find_dirname)
+    return ""
+
+
+def container_root_exists(mountpoint: str) -> bool:
+    """Checks if mountpoint has default containerd or Docker root directory."""
+    container_root_dirnames: List[str] = ["docker", "containerd"]
+
+    for container_root_dirname in container_root_dirnames:
+        container_root_path: str = _find_directory(mountpoint, container_root_dirname)
+
+        # Containerd and Docker default root directories are /var/lib/containerd and /var/lib/docker
+        # Handling edge case where /var is a dedicated Linux partition.
+        if f"lib/{container_root_dirname}" in container_root_path:
+            container_root_files = os.listdir(container_root_path)
+            if (
+                "containers" in container_root_files
+                or "io.containerd.content.v1.content" in container_root_files
+            ):
+                return True
+    return False
