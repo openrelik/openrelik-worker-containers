@@ -12,6 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-poetry \
     wget \
+    sudo \
+    fdisk \
+    qemu-utils \
+    ntfs-3g \
   && rm -rf /var/lib/apt/lists/*
 
 # Install latest release of container explorer

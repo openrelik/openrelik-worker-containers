@@ -2,7 +2,12 @@
 
 # OpenRelik worker for Containers
 
-OpenRelik Containers Worker is responsible for analyzing disk images containing containerd or Docker containers. It receives tasks via Celery to analyze disk images or specific container IDs found within those images.
+The OpenRelik Containers Worker analyzes disk images for containerd or Docker containers. It gets
+tasks through Celery to examine either entire disk images or specific container IDs found within
+them.
+
+The container worker only processes input files that are disk images with one of these extensions:
+.raw, .img, .dd, .qcow, .qcow2, or .qcow3. Files without these extensions won't be processed.
 
 ## Features
 
@@ -19,13 +24,15 @@ OpenRelik Containers Worker is responsible for analyzing disk images containing 
   - Specific Files/Directories: Exports designated files or folders from a container for use by other OpenRelik workers.
 
 - Container Export Functionality:
-  - Exports complete container filesystems as `.tar.gz` archives or `.img` disk images for OpenRelik processing.
+  - Exports complete container filesystems as `.tar.gz` archives or `.raw` disk images for OpenRelik processing.
   - Filters container exports based on labels (e.g., `io.kubernetes.pod.namespace=myapp`).
   - Excludes containers within the `kube-system` namespace.
   - Processes multiple input disks.
   - Automatically detects containers across all available namespaces.
   - Records the export time as the filesystem birth timestamp in the archive.
   - Without specific configuration, defaults to exporting all containers as disk images.
+
+  **Note**: File creation timestamp on exported containers will be the time of the export.
 
 ## Prerequisites
 
