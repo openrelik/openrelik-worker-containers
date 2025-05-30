@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Exports container to a `.img` disk image or `.tar.gz` archive."""
+"""Exports container to a `.raw` disk image or `.tar.gz` archive."""
 
 import logging
 import os
@@ -23,22 +23,34 @@ from typing import Any, Dict, List
 from uuid import uuid4
 
 from openrelik_worker_common.file_utils import create_output_file, OutputFile
-from openrelik_worker_common.task_utils import (
-    create_task_result,
-    get_input_files,
-)
+from openrelik_worker_common.mount_utils import BlockDevice
+from openrelik_worker_common.task_utils import create_task_result
+from openrelik_worker_common.task_utils import get_input_files
+from openrelik_worker_common.reporting import MarkdownDocumentSection, Report
 
 from .app import celery
-from .utils import CE_BINARY, log_entry, mount_disk, unmount_disk
+from .utils import CE_BINARY, log_entry
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+# Container worker expects input file is a disk image with one of the following file extensions
+# specified in "filenames". Input files without expected file extensions are not processed.
+COMPATIBLE_INPUTS: Dict[str, Any] = {
+    "data_types": [],
+    "mime_types": [],
+    "filenames": ["*.img", "*.raw", "*.dd", "*.qcow3", "*.qcow2", "*.qcow"],
+}
+
+# Container-Explorer exported output file extensions.
+_DISK_EXT = ".raw"  # Created when --image flag is used.
+_ARCHIVE_EXT = ".tar.gz"  # Created when --archive flag is used.
 
 # Task name used to register and route the task to the correct queue.
 TASK_NAME = "openrelik-worker-containers.tasks.container_export"
 
 # Task metadata for registration in the core system.
-TASK_METADATA = {
+TASK_METADATA: Dict[str, Any] = {
     "display_name": "Containers: Export Container",
     "description": (
         "Exports a container to either a raw disk image or an archive. If no container "
@@ -60,13 +72,13 @@ TASK_METADATA = {
         },
         {
             "name": "export_image",
-            "label": "Export container as disk image.",
+            "label": "Export container as disk image (.raw).",
             "description": "Create a disk image from a container.",
             "type": "checkbox",
         },
         {
             "name": "export_archive",
-            "label": "Export container as archive.",
+            "label": "Export container as archive (.tar.gz).",
             "description": "Create a archive (tar.gz) from a container.",
             "type": "checkbox",
         },
@@ -94,12 +106,15 @@ def export_container(
     """Exports container as disk image or an archive file."""
     logger.info("Attempting to export container ID: %s", container_id)
 
-    container_export_dir = os.path.join(output_path, uuid4().hex)
+    container_export_dir: str = os.path.join(output_path, uuid4().hex)
     os.mkdir(container_export_dir)
     logger.debug("Created container export directory %s", container_export_dir)
 
-    export_command = [
+    # TODO (rmaskey): Add support for non-default container root directory.
+    export_command: List[str] = [
         CE_BINARY,
+        "--support-container-data",
+        "/opt/container-explorer/etc/supportcontainer.yaml",
         "--image-root",
         disk_mount_dir,
         "export",
@@ -118,57 +133,59 @@ def export_container(
     if "--image" not in export_command and "--archive" not in export_command:
         export_command.append("--image")
 
-    output_files = []
+    output_files: List[OutputFile] = []
     logger.debug(
         "Running container-explorer export command %s", " ".join(export_command)
     )
 
-    process = subprocess.run(
-        export_command, capture_output=True, check=False, text=True
-    )
-    if process.returncode == 0:
-        exported_containers = os.listdir(container_export_dir)
-        for exported_container in exported_containers:
-            logger.debug(
-                "Exported container %s in export directory %s",
-                exported_container,
-                container_export_dir,
-            )
+    try:
+        process: subprocess.CompletedProcess[str] = subprocess.run(
+            export_command, capture_output=True, check=False, text=True
+        )
+        if process.returncode == 0:
+            exported_containers: List[str] = os.listdir(container_export_dir)
+            for exported_container in exported_containers:
+                logger.debug(
+                    "Exported container %s in export directory %s",
+                    exported_container,
+                    container_export_dir,
+                )
 
-            output_file = create_output_file(
-                output_path,
-                display_name=exported_container,
-                data_type="image",
-                extension=exported_container.split(".")[-1],
-                source_file_id=input_file.get("id"),
-            )
+                output_file: OutputFile = create_output_file(
+                    output_path,
+                    display_name=exported_container,
+                    data_type="image",
+                    extension=exported_container.split(".")[-1],
+                    source_file_id=input_file.get("id"),
+                )
 
-            # Converting ContainerExplorer generated output file to OpenRelik compatible name
-            # and location.
-            shutil.move(
-                os.path.join(container_export_dir, exported_container), output_file.path
-            )
+                # Converting ContainerExplorer generated output file to OpenRelik compatible name
+                # and location.
+                shutil.move(
+                    os.path.join(container_export_dir, exported_container),
+                    output_file.path,
+                )
 
-            # Fix double extension in display_name
-            output_file.display_name = exported_container
+                # Fix double extension in display_name
+                output_file.display_name = exported_container
 
-            logger.info(f"Exporting container {container_id} as {output_file.path}")
-            log_entry(
-                log_file, f"Exporting container {container_id} as {exported_container}"
-            )
+                logger.info(f"Exporting container {container_id} as {output_file.path}")
+                log_entry(
+                    log_file,
+                    f"Exporting container {container_id} as {exported_container}",
+                )
 
-            output_files.append(output_file)
-
+                output_files.append(output_file)
+        else:
+            _log_message: str = f"Error exporting container {container_id}"
+            logger.error(_log_message)
+            log_entry(log_file, _log_message)
+    except subprocess.CalledProcessError as err:
+        logger.error("Error calling container-explorer command: %s", str(err))
+    finally:
         # Clean up temporary folder
         shutil.rmtree(container_export_dir)
         logger.debug("Deleted container export directory %s", container_export_dir)
-
-    else:
-        log_entry(
-            log_file,
-            f"Error exporting container {container_id} in disk "
-            f"{os.path.basename(input_file.get('path', ''))}",
-        )
 
     return output_files
 
@@ -180,17 +197,20 @@ def export_all_containers(
     disk_mount_dir: str,
     task_config: Dict[str, str],
 ) -> List[OutputFile]:
-    """Exports all containers disk image (.img) or archive (.tar.gz)."""
+    """Exports all containers disk image (.raw) or archive (.tar.gz)."""
     logger.info(
         "Attempting to export all containers on disk mounted at %s", disk_mount_dir
     )
 
-    container_export_dir = os.path.join(output_path, uuid4().hex)
+    container_export_dir: str = os.path.join(output_path, uuid4().hex)
     os.mkdir(container_export_dir)
     logger.debug("Created container export directory %s", container_export_dir)
 
-    export_command = [
+    # TODO (rmaskey): Add support for non-default container root directory.
+    export_command: List[str] = [
         CE_BINARY,
+        "--support-container-data",
+        "/opt/container-explorer/etc/supportcontainer.yaml",
         "--image-root",
         disk_mount_dir,
         "export-all",
@@ -209,81 +229,132 @@ def export_all_containers(
         export_command.append("--image")
 
     # Filter container to export using container label key-value pairs.
-    filter = task_config.get("filter")
+    filter: str | None = task_config.get("filter")
     if filter:
         export_command.extend(["--filter", filter])
 
-    output_files = []
+    output_files: List[OutputFile] = []
 
     logger.debug(
         "Running container-explorer export command %s", " ".join(export_command)
     )
 
-    process = subprocess.run(
-        export_command, capture_output=True, check=False, text=True
-    )
-    if process.returncode == 0:
-        exported_containers = os.listdir(container_export_dir)
-        for exported_container in exported_containers:
+    try:
+        process: subprocess.CompletedProcess[str] = subprocess.run(
+            export_command, capture_output=True, check=False, text=True
+        )
+        if process.returncode == 0:
+            exported_containers: List[str] = os.listdir(container_export_dir)
             logger.debug(
-                "Exported container %s in export directory %s",
-                exported_container,
+                "%d container output files in export directory %s",
+                len(exported_containers),
                 container_export_dir,
             )
 
-            output_file = create_output_file(
-                output_path,
-                display_name=exported_container,
-                data_type="image",
-                extension=exported_container.split(".")[-1],
-                source_file_id=input_file.get("id"),
+            for exported_container in exported_containers:
+                logger.debug(
+                    "Exported container %s in export directory %s",
+                    exported_container,
+                    container_export_dir,
+                )
+
+                output_file: OutputFile = create_output_file(
+                    output_path,
+                    display_name=exported_container,
+                    data_type="image",
+                    extension=exported_container.split(".")[-1],
+                    source_file_id=input_file.get("id"),
+                )
+
+                # Converting ContainerExplorer generated output file to OpenRelik compatible name
+                # and location.
+                shutil.move(
+                    os.path.join(container_export_dir, exported_container),
+                    output_file.path,
+                )
+
+                # Fix display_name double extension
+                output_file.display_name = exported_container
+
+                # Determine container ID based on exported container file.
+                #
+                # When Container Explorer `export-all` command is used to export all containers,
+                # container ID is not provided to the function. We are determining the container ID
+                # based on the exported container files in the specified container output directory.
+                #
+                # Container name may have '.' in the container name. Thus, using known extensions to
+                # identify container ID, and falling back to '.' as separator to handle unknown.
+                container_id: str = ""
+                if _DISK_EXT in exported_container:
+                    container_id = exported_container.split(_DISK_EXT)[0]
+                elif _ARCHIVE_EXT in exported_container:
+                    container_id = exported_container.split(_ARCHIVE_EXT)[0]
+                else:
+                    container_id: str = exported_container.split(".")[0]
+
+                logger.info(f"Exporting container {container_id} as {output_file.path}")
+                log_entry(
+                    log_file,
+                    f"Exporting container {container_id} as {exported_container}",
+                )
+
+                output_files.append(output_file)
+            logger.debug("%d output file created", len(output_files))
+
+        else:
+            _log_message: str = (
+                f"Error exporting all containers in disk {input_file.get('id')}"
             )
+            logger.error(_log_message)
+            log_entry(log_file, _log_message)
 
-            # Converting ContainerExplorer generated output file to OpenRelik compatible name
-            # and location.
-            shutil.move(
-                os.path.join(container_export_dir, exported_container), output_file.path
-            )
-
-            # Fix display_name double extension
-            output_file.display_name = exported_container
-
-            container_id = ""
-            if ".img" in exported_container:
-                container_id = exported_container.split(".img")[0]
-            elif ".tar.gz" in exported_container:
-                container_id = exported_container.split(".tar.gz")[0]
-
-            logger.info(f"Exporting container {container_id} as {output_file.path}")
-            log_entry(
-                log_file, f"Exporting container {container_id} as {exported_container}"
-            )
-
-            output_files.append(output_file)
-
-        # Clean up container output directory
+    except subprocess.CalledProcessError as err:
+        logger.error("Error calling container-explorer command: %s", str(err))
+    finally:
+        # Clean up temporary folder
         shutil.rmtree(container_export_dir)
-        logger.debug("Removing container export directory %s", container_export_dir)
-    else:
-        log_entry(
-            log_file,
-            f"Error exporting all containers in disk "
-            f"{os.path.basename(input_file.get('path', ''))}",
-        )
+        logger.debug("Deleted container export directory %s", container_export_dir)
 
     return output_files
+
+
+def _find_directory(root_dir: str, find_dirname: str) -> str:
+    """Find a directory name in the specified path."""
+    for dirpath, dirnames, _ in os.walk(root_dir):
+        if find_dirname in dirnames:
+            return os.path.join(dirpath, find_dirname)
+    return ""
+
+
+def container_root_exists(mountpoint: str) -> bool:
+    """Checks if mountpoint has default containerd or Docker root directory."""
+    container_root_dirnames: List[str] = ["docker", "containerd"]
+
+    for container_root_dirname in container_root_dirnames:
+        container_root_path: str = _find_directory(mountpoint, container_root_dirname)
+
+        # Containerd and Docker default root directories are /var/lib/containerd and /var/lib/docker
+        # Handling edge case where /var is a dedicated Linux partition.
+        if f"lib/{container_root_dirname}" in container_root_path:
+            container_root_files = os.listdir(container_root_path)
+            if (
+                "containers" in container_root_files
+                or "io.containerd.content.v1.content" in container_root_files
+            ):
+                return True
+    return False
 
 
 @celery.task(bind=True, name=TASK_NAME, metadata=TASK_METADATA)
 def container_export(
     self,
-    pipe_result: str = None,
-    input_files: list = None,
-    output_path: str = None,
-    workflow_id: str = None,
-    task_config: dict = None,
+    pipe_result: str = "",
+    input_files: List[Any] = [],
+    output_path: str = "",
+    workflow_id: str = "",
+    task_config: Dict[str, Any] = {},
 ) -> str:
-    """Export containers as zip files.
+    """Export containers as disk image, archive, or both.
 
     Args:
         pipe_result: Base64-encoded result from the previous Celery task, if any.
@@ -300,20 +371,22 @@ def container_export(
         "Starting container export task ID: %s, Workflow ID: %s", task_id, workflow_id
     )
 
-    final_output_files = []
-    temp_dir = None
-    disk_mount_dir = None
-    returned_disk_mount_dir = None
+    final_output_files: List[Any] = []
+    log_files: List[Any] = []
+    temp_dir: str = ""
+    mountpoints: List[str] = []
 
-    input_files = get_input_files(pipe_result, input_files or [])
+    input_files = get_input_files(
+        pipe_result, input_files or [], filter=COMPATIBLE_INPUTS
+    )
 
     # Log file to capture logs.
-    log_file = create_output_file(
+    log_file: OutputFile = create_output_file(
         output_path,
         extension="log",
         display_name="container_export",
     )
-    final_output_files.append(log_file.to_dict())
+    log_files.append(log_file.to_dict())
 
     if not input_files:
         message = "No input files provided."
@@ -325,8 +398,8 @@ def container_export(
             workflow_id=workflow_id,
         )
 
-    container_ids = []
-    container_ids_str = task_config.get("container_id", "")
+    container_ids: List[str] = []
+    container_ids_str: str = task_config.get("container_id", "")
     if container_ids_str:
         for container_id in container_ids_str.split(","):
             if not container_id:
@@ -337,103 +410,142 @@ def container_export(
     for input_file in input_files:
         logger.info("Processing disk %s", input_file.get("id"))
 
-        temp_dir = os.path.join(output_path, f"tmp{uuid4().hex[:6]}")
-        os.makedirs(temp_dir, exist_ok=True)
-
         if container_ids:
             logger.info("Processing container IDs %s", ",".join(container_ids))
         else:
             logger.info("Processing all containers")
 
-        disk_name = os.path.basename(input_file.get("path"))
-        disk_image_path = os.path.join(temp_dir, disk_name)
-
         try:
-            os.link(input_file.get("path"), disk_image_path)
+            bd = BlockDevice(input_file.get("path"))
+            bd.setup()
+            mountpoints: List[str] = bd.mount()
+
+            if not mountpoints:
+                logger.info(
+                    "No mountpoints return for the disk %s", input_file.get("id")
+                )
+
+                logger.debug("Unmounting the disk %s", input_file.get("id"))
+                bd.umount()
+
+                continue
+
+            export_files: List[OutputFile] = []
+
+            for mountpoint in mountpoints:
+                logger.debug(
+                    "Processing mountpoint %s from disk %s",
+                    mountpoint,
+                    input_file.get("id"),
+                )
+
+                if not container_root_exists(mountpoint):
+                    logger.debug(
+                        "Container root does not exist in mountpoint %s. Skipping...",
+                        mountpoint,
+                    )
+
+                    log_entry(
+                        log_file,
+                        f"Default container root directories do not exist in {input_file.get('id')}",
+                    )
+
+                    continue
+
+                # Export all containers from the mountpoint.
+                if not container_ids:
+                    logger.debug(
+                        "Procesing mountpoint %s to export all containers", mountpoint
+                    )
+
+                    container_export_files: List[OutputFile] = export_all_containers(
+                        input_file, output_path, log_file, mountpoint, task_config
+                    )
+                    if container_export_files:
+                        export_files.extend(container_export_files)
+                        log_entry(
+                            log_file,
+                            f"Exported {len(container_export_files)} containers",
+                        )
+
+                    logger.debug(
+                        "Exported %d containers from mountpoint %s",
+                        len(container_export_files),
+                        mountpoint,
+                    )
+
+                # Export specified containers from the mountpoint.
+                else:
+                    for container_id in container_ids:
+                        logger.debug(
+                            "Processing mountpoint %s for container %s",
+                            mountpoint,
+                            container_id,
+                        )
+
+                        container_export_files: List[OutputFile] = export_container(
+                            input_file,
+                            output_path,
+                            log_file,
+                            mountpoint,
+                            container_id,
+                            task_config,
+                        )
+                        if container_export_files:
+                            export_files.extend(container_export_files)
+
+                        logger.debug(
+                            "Exported %d containers from mountpoint %s",
+                            len(container_export_files),
+                            mountpoint,
+                        )
+
             logger.debug(
-                "Created disk link %s to %s", input_file.get("path"), disk_image_path
+                "Completed processing mountpoints in disk %s", input_file.get("id")
             )
-        except OSError as e:
-            message = (
-                f"Failed to link input file {input_file.get('path')} to "
-                f"{disk_image_path}: {e}"
-            )
-            logger.error(message)
-            log_entry(log_file, message)
-            raise Exception(message)
 
-        # Mount disk image to /mnt/{uuid} on worker.
-        disk_mount_dir = os.path.join("/mnt", uuid4().hex[:6])
-        os.makedirs(disk_mount_dir)
-        logger.debug("Created disk mount directory %s", disk_mount_dir)
+            for export_file in export_files:
+                final_output_files.append(export_file.to_dict())
 
-        returned_disk_mount_dir = mount_disk(disk_image_path, disk_mount_dir)
-        if not returned_disk_mount_dir:
+        except RuntimeError as err:
+            logger.error("Error mounting disk image: %s", str(err))
+
+        except:
             logger.error(
-                "Error mounting disk %s to %s", input_file.get("id"), disk_mount_dir
-            )
-            log_entry(log_file, f"Error mounting disk {input_file.get('id')}")
-
-            # Cleanup and skip
-            shutil.rmtree(disk_mount_dir)
-            continue
-
-        export_files = []
-
-        if not container_ids:
-            all_export_files = export_all_containers(
-                input_file, output_path, log_file, returned_disk_mount_dir, task_config
+                "Encounted unexpected error while processing disk %s",
+                input_file.get("id"),
             )
 
-            if all_export_files:
-                export_files.extend(all_export_files)
+        finally:
+            logger.debug("Unmounting disk %s", input_file.get("id"))
+            bd.umount()
 
-            _log_message = f"Exported {len(all_export_files)} containers files."
-            logger.info(_log_message)
-            log_entry(log_file, _log_message)
-        else:
-            # Export specific containers
-            for container_id in container_ids:
-                container_export_files = export_container(
-                    input_file,
-                    output_path,
-                    log_file,
-                    disk_mount_dir,
-                    container_id,
-                    task_config,
-                )
+    logger.debug("Completed processing %d input disks", len(input_files))
 
-                if container_export_files:
-                    export_files.extend(container_export_files)
-
-            _log_message = f"Exported {len(export_files)} containers files."
-            logger.info(_log_message)
-            log_entry(log_file, _log_message)
-
-        for export_file in export_files:
-            final_output_files.append(export_file.to_dict())
-
-        # Unmount disk
-        if returned_disk_mount_dir:
-            unmount_disk(returned_disk_mount_dir, log_file)
-        elif disk_mount_dir and os.path.ismount(disk_mount_dir):
-            unmount_disk(disk_mount_dir, log_file)
-
-        if disk_mount_dir and os.path.exists(disk_mount_dir):
-            try:
-                if not os.path.ismount(disk_mount_dir):
-                    shutil.rmtree(disk_mount_dir)
-            except OSError as e:
-                logger.error(
-                    "Error unmounting directory %s: %s", disk_mount_dir, str(e)
-                )
-
-        # Clean up
-        if temp_dir:
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
+    report: Report = container_export_report(final_output_files)
 
     return create_task_result(
-        output_files=final_output_files,
         workflow_id=workflow_id,
+        output_files=final_output_files,
+        task_files=log_files,
+        task_report=report.to_dict(),
     )
+
+
+def container_export_report(output_files: List[Dict]) -> Report:
+    """Generates and returns container export report."""
+    logger.debug("Generating container export report")
+
+    report: Report = Report("Container Export Report")
+    summary: MarkdownDocumentSection = report.add_section()
+
+    if not output_files:
+        summary.add_paragraph("No container exported.")
+        return report
+
+    for output_file in output_files:
+        summary.add_bullet(
+            f"Exported container output file {output_file.get('display_name')}"
+        )
+
+    return report

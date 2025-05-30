@@ -49,10 +49,7 @@ class TestContainerExport(unittest.TestCase):
         self.disk_mount_dir = "/mnt/disk"
         self.container_id = "container_abcdef"
         self.workflow_id = "test_workflow_id"
-        self.task_config = {
-            "export_image": True,
-            "export_archive": None
-        }
+        self.task_config = {"export_image": True, "export_archive": None}
 
     @patch("src.container_export.logger")
     @patch("src.container_export.os.path.join")
@@ -73,16 +70,16 @@ class TestContainerExport(unittest.TestCase):
         mock_os_listdir,
         mock_os_mkdir,
         mock_os_path_join,
-        mock_logger
+        mock_logger,
     ):
         """Test successful container export."""
-        exported_file = f"{self.container_id}.img"
+        exported_file = f"{self.container_id}.raw"
         mock_output_file = MagicMock()
-        mock_output_file.path = "/fake/output/container_abcdef.img"
-        mock_output_file.return_value = "container_abcdef.img"
-        mock_output_file.display_name = "container_abcdef.img"
+        mock_output_file.path = "/fake/output/container_abcdef.raw"
+        mock_output_file.return_value = "container_abcdef.raw"
+        mock_output_file.display_name = "container_abcdef.raw"
         mock_output_file.to_dict.return_value = {
-            "path": "/fake/output/container_abcdef.img",
+            "path": "/fake/output/container_abcdef.raw",
             "display_name": "container_abcdef",
             "id": "disk.raw",
         }
@@ -98,14 +95,14 @@ class TestContainerExport(unittest.TestCase):
             self.log_file,
             self.disk_mount_dir,
             self.container_id,
-            self.task_config
+            self.task_config,
         )
 
         mock_create_output_file.assert_called_once_with(
             self.output_path,
             display_name=exported_file,
             data_type="image",
-            extension="img",
+            extension="raw",
             source_file_id="disk.raw",
         )
 
@@ -130,23 +127,25 @@ class TestContainerExport(unittest.TestCase):
         mock_os_listdir,
         mock_os_mkdir,
         mock_os_path_join,
-        mock_logger
+        mock_logger,
     ):
         """Test failure container export."""
-        exported_file = f"{self.container_id}.img"
+        exported_file = f"{self.container_id}.raw"
         mock_output_file = MagicMock()
-        mock_output_file.path = "/fake/output/container_abcdef.img"
-        mock_output_file.return_value = "container_abcdef.img"
-        mock_output_file.display_name = "container_abcdef.img"
+        mock_output_file.path = "/fake/output/container_abcdef.raw"
+        mock_output_file.return_value = "container_abcdef.raw"
+        mock_output_file.display_name = "container_abcdef.raw"
         mock_output_file.to_dict.return_value = {
-            "path": "/fake/output/container_abcdef.img",
+            "path": "/fake/output/container_abcdef.raw",
             "display_name": "container_abcdef",
             "id": "disk.raw",
         }
 
         mock_os_path_join.return_value = "/fake/output/container_export_dir"
         mock_os_listdir.return_value = [exported_file]
-        mock_subprocess_run.return_value = MagicMock(returncode=1, stdout="out", stderr="err")
+        mock_subprocess_run.return_value = MagicMock(
+            returncode=1, stdout="out", stderr="err"
+        )
         mock_create_output_file.return_value = mock_output_file
 
         result = export_container(
@@ -155,7 +154,7 @@ class TestContainerExport(unittest.TestCase):
             self.log_file,
             self.disk_mount_dir,
             self.container_id,
-            self.task_config
+            self.task_config,
         )
 
         container_id = self.container_id
@@ -164,7 +163,7 @@ class TestContainerExport(unittest.TestCase):
         mock_log_file = mock_log_file_instance
         mock_log_entry.assert_called_once_with(
             mock_log_file,
-            f"Error exporting container {container_id} in disk {disk_name}"
+            f"Error exporting container {container_id}",
         )
 
         self.assertEqual(result, [])
@@ -188,33 +187,33 @@ class TestContainerExport(unittest.TestCase):
         mock_os_listdir,
         mock_os_mkdir,
         mock_os_path_join,
-        mock_logger
+        mock_logger,
     ):
         """Test successful container export."""
         mock_output_file_1 = MagicMock(
-            path="/fake/output/container_1.img",
-            display_name="container_1.img",
-            id="disk.raw"
+            path="/fake/output/container_1.raw",
+            display_name="container_1.raw",
+            id="disk.raw",
         )
         mock_output_file_1.to_dict.return_value = {
-            "path": "/fake/output/container_1.img",
-            "display_name": "container_1.img",
+            "path": "/fake/output/container_1.raw",
+            "display_name": "container_1.raw",
             "id": "disk.raw",
         }
 
         mock_output_file_2 = MagicMock(
-            path="/fake/output/container_2.img",
-            display_name="container_2.img",
-            id="disk.raw"
+            path="/fake/output/container_2.raw",
+            display_name="container_2.raw",
+            id="disk.raw",
         )
         mock_output_file_2.to_dict.return_value = {
-            "path": "/fake/output/container_2.img",
-            "display_name": "container_2.img",
+            "path": "/fake/output/container_2.raw",
+            "display_name": "container_2.raw",
             "id": "disk.raw",
         }
 
-        exported_file_1 = "container_1.img"
-        exported_file_2 = "container_2.img"
+        exported_file_1 = "container_1.raw"
+        exported_file_2 = "container_2.raw"
 
         mock_os_path_join.return_value = "/fake/output/container_export_dir"
         mock_os_listdir.return_value = [exported_file_1, exported_file_2]
@@ -227,7 +226,7 @@ class TestContainerExport(unittest.TestCase):
             self.output_path,
             self.log_file,
             self.disk_mount_dir,
-            self.task_config
+            self.task_config,
         )
 
         self.assertEqual(result, [mock_output_file_1, mock_output_file_2])
