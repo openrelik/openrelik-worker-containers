@@ -23,8 +23,7 @@ import subprocess
 from typing import Any, List, Dict
 from uuid import uuid4
 
-from openrelik_worker_common.file_utils import create_output_file
-from openrelik_worker_common.file_utils import OutputFile
+from openrelik_worker_common.file_utils import create_output_file, OutputFile
 from openrelik_worker_common.mount_utils import BlockDevice
 from openrelik_worker_common.reporting import (
     MarkdownDocument,
@@ -32,14 +31,10 @@ from openrelik_worker_common.reporting import (
     MarkdownTable,
 )
 from openrelik_worker_common.reporting import Report
-from openrelik_worker_common.task_utils import create_task_result
-from openrelik_worker_common.task_utils import get_input_files
+from openrelik_worker_common.task_utils import create_task_result, get_input_files
 
 from .app import celery
-from .utils import CE_BINARY
-from .utils import COMPATIBLE_INPUTS
-from .utils import container_root_exists
-from .utils import log_entry
+from .utils import CE_BINARY, COMPATIBLE_INPUTS, container_root_exists, log_entry
 
 # Set up logging
 logger: logging.Logger = logging.getLogger(__name__)
