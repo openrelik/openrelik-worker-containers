@@ -12,113 +12,95 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for OpenRelik container_drift task."""
+"""Unit tests for container list."""
 
-import base64
+import hashlib
 import json
 import os
 import unittest
+import tempfile
+
+from typing import Dict, List
 from unittest.mock import patch, mock_open, MagicMock
 
-from src.container_list import container_list
-from src.container_list import read_container_explorer_output
+
+from openrelik_worker_common.file_utils import create_output_file
+from openrelik_worker_common.file_utils import OutputFile
+
+from src.container_list import list_containers
+from src.container_list import _read_json_file
 
 
 class TestContainerListTask(unittest.TestCase):
     """Unit test for OpenRelik container list task."""
 
     def setUp(self):
-        self.workflow_id = "test-workflow-id"
-        self.input_files = [{"path": "/tmp/fake/disk.img"}]
+        self.input_file = MagicMock()
+        self.input_file.id = "disk.raw"
+        self.input_file.path = "/fake/disk.raw"
+        self.input_file.get.return_value = "disk.raw"
 
-        self.output_path = "/tmp/fake/ouptput"
-        self.temp_dir = os.path.join(self.output_path, "temp_dir")
-        self.disk_image_path = os.path.join(self.temp_dir, "disk.img")
-        self.log_file_path = os.path.join(self.output_path, "container_list.log")
-        self.container_output_file = os.path.join(
-            self.output_path, "container_list.json"
+        self.output_path: str = tempfile.TemporaryDirectory().name
+        self.log_file: OutputFile = create_output_file(
+            self.output_path, display_name="container_list", extension="json"
         )
 
-        os.makedirs(self.temp_dir, exist_ok=True)
+        os.makedirs(self.output_path, exist_ok=True)
 
-    def tearDown(self):
-        if os.path.exists(self.temp_dir):
-            os.rmdir(self.temp_dir)
-
+    @patch("src.container_list.logger")
+    @patch("src.container_list.os.mkdir")
+    @patch("src.container_list._list_containerd_containers")
+    @patch("src.container_list._list_docker_containers")
+    @patch("src.container_list._read_json_file")
     @patch("src.container_list.os.path.exists")
-    @patch("src.container_list.json.loads")
-    def test_read_container_explorer_output_success(
-        self, mock_json_loads, mock_path_exists
-    ):
-        """Tests read_container_explorer_output function for success."""
-        mock_path_exists.return_value = True
-        mock_json_loads.return_value = [{"container": "test"}]
-
-        mock_open_file = mock_open(read_data='[{"container": "test"}]')
-        with patch("builtins.open", mock_open_file):
-            result = read_container_explorer_output(self.container_output_file)
-            self.assertEqual(result, [{"container": "test"}])
-
-    def test_read_container_explorer_output_file_not_exist(self):
-        """Tests read_container_explorer_output for failure."""
-
-        result = read_container_explorer_output("/tmp/non/existent/path")
-        self.assertIsNone(result)
-
-    @patch("src.container_drift.get_input_files")
-    @patch("src.container_drift.os.mkdir")
-    @patch("src.container_drift.os.link")
-    @patch("src.container_drift.os.path.exists")
-    @patch("src.container_drift.subprocess.run")
-    @patch("src.container_drift.shutil.rmtree")
-    def test_container_list(
+    @patch("src.container_list.shutil.rmtree")
+    def test_list_containers(
         self,
-        mock_rmtree,
-        mock_subprocess_run,
-        mock_path_exists,
-        mock_link,
-        mock_mkdir,
-        mock_get_input_files,
-    ):
-        """Tests listing containers."""
-        mock_get_input_files.return_value = self.input_files
-        mock_subprocess_run.return_value = MagicMock(returncode=0, status="success")
-        mock_path_exists.return_value = True
+        mock_shutil_rmtree,
+        mock_os_path_exists,
+        mock_read_json_file,
+        mock_list_docker_containers,
+        mock_list_containerd_containers,
+        mock_os_listdir,
+        mock_logger,
+    ) -> None:
+        """Test listing docker containers."""
+        with open(
+            os.path.join("test_data", "container_list.json"), "r", encoding="utf-8"
+        ) as fh:
+            data = json.loads(fh.read())
+        mock_read_json_file.return_value = data
 
-        with patch(
-            "src.container_list.read_container_explorer_output",
-            return_value=[{"container": "test"}],
-        ):
-            result = container_list(
-                pipe_result=None,
-                input_files=self.input_files,
-                output_path=self.output_path,
-                workflow_id=self.workflow_id,
-                task_config=None,
-            )
+        mountpoint: str = "/mnt/fake"
 
-            decoded_result = base64.b64decode(result)
-            data = json.loads(decoded_result)
+        result: OutputFile = list_containers(
+            self.input_file, self.output_path, self.log_file, mountpoint
+        )
 
-            workflow_id = data.get("workflow_id")
-            self.assertEqual(self.workflow_id, workflow_id)
+        content: str = ""
+        result_content_hash: str = ""
 
-            expected_command = (
-                "/opt/container-explorer/bin/ce [--docker-managed] --output json "
-                "--image-root /mnt list containers"
-            )
-            command = data.get("command")
-            self.assertEqual(expected_command, command)
+        with open(result.path, "r", encoding="utf-8") as fh:
+            content = fh.read()
+            result_content_hash: str = hashlib.md5(content.encode()).hexdigest()
 
-            expected_display_names = ["container_list.json", "container_list.log"]
+        self.assertEqual(result_content_hash, "8d9f8b3851334af1b80b6676597c2359")
 
-            display_names = []
-            for output_file in data.get("output_files", []):
-                display_name = output_file.get("display_name")
-                if display_name:
-                    display_names.append(display_name)
+        # Four container info entries will be created.
+        json_data = json.loads(content)
+        self.assertEqual(len(json_data), 4)
 
-            self.assertListEqual(expected_display_names, display_names)
+    def test_read_json_file(self):
+        """Tests supporting function _read_json_file."""
+        json_file: str = os.path.join("test_data", "container_list.json")
+        data: List[Dict] = _read_json_file(json_file)
+
+        content: str = json.dumps(data, indent=4)
+        content_hash: str = hashlib.md5(content.encode()).hexdigest()
+
+        # Expected hash is calculated by running md5sum test_data/container_list.json
+        expected_hash: str = "3bc5afa979113b3f0e32cf216a2f9794"
+        self.assertEqual(content_hash, expected_hash)
 
 
 if __name__ == "__main__":
