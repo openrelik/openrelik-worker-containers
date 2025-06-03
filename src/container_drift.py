@@ -12,72 +12,53 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Shows filesystem files and directories changes in containers."""
+
+import csv
+import logging
 import json
 import os
 import shutil
 import subprocess
 
-from typing import List, Dict
+from typing import Any
 from uuid import uuid4
 
-from openrelik_worker_common.file_utils import create_output_file
-from openrelik_worker_common.task_utils import (
-    create_task_result,
-    get_input_files,
-)
+from openrelik_worker_common.file_utils import create_output_file, OutputFile
+from openrelik_worker_common.mount_utils import BlockDevice
+from openrelik_worker_common.reporting import MarkdownDocumentSection, Report
+from openrelik_worker_common.task_utils import create_task_result, get_input_files
 
 from .app import celery
+from .utils import CE_BINARY, COMPATIBLE_INPUTS, container_root_exists, log_entry
+
+# Setting up task logger
+logger: logging.Logger = logging.getLogger(__name__)
 
 # Task name used to register and route the task to the correct queue.
-TASK_NAME = "openrelik-worker-containers.tasks.container_drift"
+TASK_NAME: str = "openrelik-worker-containers.tasks.container_drift"
 
 # Task metadata for registration in the core system.
-TASK_METADATA = {
-    "display_name": "ContainerExplorer: Drift",
-    "description": "Container drift",
+TASK_METADATA: dict[str, Any] = {
+    "display_name": "Container Drift",
+    "description": "Shows filesystem files and directories changes in containers",
 }
-
-CE_BINARY = "/opt/container-explorer/bin/ce"
-DISK_MOUNT_DIR = "/mnt"
-CONTAINERD_ROOT_DIR = os.path.join(DISK_MOUNT_DIR, "var", "lib", "containerd")
-DOCKER_ROOT_DIR = os.path.join(DISK_MOUNT_DIR, "var", "lib", "docker")
-
-
-def read_container_explorer_output(path: str) -> List[Dict]:
-    """Reads Container Explorer's JSON output and returns list.
-
-    Args:
-        path: JSON output file produced by Container Explorer.
-
-    Returns:
-        Returns the JSON output file produced by Container Explorer.
-    """
-    if not os.path.exists(path):
-        return None
-
-    data = None
-    with open(path, "r", encoding="utf-8") as file_handler:
-        try:
-            data = json.loads(file_handler.read())
-        except (FileNotFoundError, json.decoder.JSONDecodeError):
-            return None
-    return data
 
 
 @celery.task(bind=True, name=TASK_NAME, metadata=TASK_METADATA)
 def container_drift(
     self,
-    pipe_result: str = None,
-    input_files: list = None,
-    output_path: str = None,
-    workflow_id: str = None,
-    task_config: dict = None,
+    pipe_result: str = "",
+    input_files: list[dict] = [],
+    output_path: str = "",
+    workflow_id: str = "",
+    task_config: dict[str, Any] = {},
 ) -> str:
-    """Run Container Explorer on input files.
+    """Checks for drifts in containers.
 
     Args:
         pipe_result: Base64-encoded result from the previous Celery task, if any.
-        input_files: List of input file dictionaries (unused if pipe_result exists).
+        input_files: list of input file dictionaries (unused if pipe_result exists).
         output_path: Path to the output directory.
         workflow_id: ID of the workflow.
         task_config: User configuration for the task.
@@ -85,162 +66,349 @@ def container_drift(
     Returns:
         Base64-encoded dictionary containing task results.
     """
-    input_files = get_input_files(pipe_result, input_files or [])
-    output_files = []
-
-    temp_dir = os.path.join(output_path, uuid4().hex)
-    os.mkdir(temp_dir)
-
-    # Log file to capture logs.
-    log_file = create_output_file(
-        output_path,
-        extension="log",
-        display_name="container_drift",
+    task_id: str = self.request.id
+    logger.debug(
+        "Starting containers worker task: task_id=%s, workflow_id: %s",
+        task_id,
+        workflow_id,
     )
 
-    for input_file in input_files:
-        filename = os.path.basename(input_file.get("path"))
-        disk_image_path = os.path.join(temp_dir, filename)
+    # Task output files that can be provided to next worker for processing.
+    output_files: list[dict] = []
 
-        os.link(input_file.get("path"), disk_image_path)
+    # Files created by the task that could be useful for user but not used for processing by
+    # other workers. For example task log file.
+    task_files: list[dict] = []
 
-        mount_command = [
-            "mount",
-            "-o",
-            "ro,noload",
-            disk_image_path,
-            DISK_MOUNT_DIR,
-        ]
+    # Task log file that containers relevant information for task user.
+    # Note: This should not be used to capture debug messages not useful for user.
+    log_file: OutputFile = create_output_file(
+        output_base_path=output_path,
+        display_name="container_drift",
+        extension="log",
+    )
 
-        process = subprocess.run(
-            mount_command, capture_output=True, check=False, text=True
+    task_files.append(log_file.to_dict())
+
+    # Get input files compatible with containers worker i.e. input files with extensions like
+    # .raw, .dd, .img, .qcow, .qcow2, .qcow3, etc.
+    input_files = get_input_files(
+        pipe_result=pipe_result, input_files=input_files or [], filter=COMPATIBLE_INPUTS
+    )
+
+    if not input_files:
+        logger.warning("No supported input files provided.")
+        log_entry(log_file, "No supported input files provided.")
+
+        report: Report = Report("Container Drift Report")
+        report.add_section().add_paragraph("No supported input files provided")
+
+        return create_task_result(
+            output_files=output_files,
+            workflow_id=workflow_id,
+            task_files=task_files,
+            task_report=report.to_dict(),
         )
-        if process.returncode != 0:
-            raise RuntimeError(
-                "Error mounting disk image ", input_file.get("path"), process.stdout
+
+    for input_file in input_files:
+        input_file_path: str = input_file.get("path", "")
+        if not input_file_path:
+            logger.error("No path for the input file.")
+            log_entry(log_file, "No path for input file.")
+            continue
+
+        try:
+            # Using shorter mountpoint like /mnt/abcdef.
+            # Overlay mount layers can get large and reach mount option limit of 4KB.
+            bd: BlockDevice = BlockDevice(
+                image_path=input_file_path, max_mountpath_size=11
             )
+            bd.setup()
 
-        # Before proceeding further check if container directories exist.
-        if not CONTAINERD_ROOT_DIR and not DOCKER_ROOT_DIR:
-            with open(log_file.path, "a", encoding="utf-8") as log_writer:
-                log_writer.write("Container root directories does not exist")
-                log_writer.write("")
+            mountpoints: list[str] = bd.mount()
+            if not mountpoints:
+                logger.info("No mountpoints returned for input file")
+                bd.umount()
+                continue
 
-            output_files.append(log_file.to_dict())
+            # Process each mountpoint and check for containers.
+            for mountpoint in mountpoints:
+                logger.debug("Processing mountpoint %s", mountpoint)
 
-            unmount_command = [
-                "umount",
-                DISK_MOUNT_DIR,
-            ]
-            subprocess.run(unmount_command, capture_output=False, check=True)
-
-            return create_task_result(
-                output_files=output_files,
-                workflow_id=workflow_id,
-            )
-
-        # dritfs holds drift infomration from containerd containers
-        # and Docker containers
-        drifts = []
-
-        # containerd containers drift
-        if os.path.exists(CONTAINERD_ROOT_DIR):
-            containerd_output_file = create_output_file(
-                output_path,
-                display_name="containerd_drift",
-                extension="json",
-            )
-
-            containerd_drift_command = [
-                CE_BINARY,
-                "--image-root",
-                DISK_MOUNT_DIR,
-                "--output-file",
-                containerd_output_file.path,
-                "--output",
-                "json",
-                "drift",
-            ]
-
-            process = subprocess.run(
-                containerd_drift_command, capture_output=True, check=False, text=True
-            )
-            if process.returncode == 0:
-                containerd_drifts = read_container_explorer_output(
-                    containerd_output_file.path
-                )
-                if containerd_drifts:
-                    drifts.extend(containerd_drifts)
-            else:
-                with open(log_file.path, "a", encoding="utf-8") as log_writer:
-                    log_writer.write(f"Error running drift command. {process.stdout}")
-                    log_writer.write("")
-
-        # Docker containers drift
-        if os.path.exists(DOCKER_ROOT_DIR):
-            docker_output_file = create_output_file(
-                output_path, display_name="docker_drift", extension="json"
-            )
-
-            docker_drift_command = [
-                CE_BINARY,
-                "--docker-managed",
-                "--image-root",
-                DISK_MOUNT_DIR,
-                "--output-file",
-                docker_output_file.path,
-                "--output",
-                "json",
-                "drift",
-            ]
-
-            process = subprocess.run(
-                docker_drift_command, capture_output=True, check=False, text=True
-            )
-            if process.returncode == 0:
-                docker_drifts = read_container_explorer_output(docker_output_file.path)
-                if docker_drifts:
-                    drifts.extend(docker_drifts)
-            else:
-                with open(log_file.path, "a", encoding="utf-8") as log_writer:
-                    log_writer.write(
-                        f"Error running Docker drift command. {process.stdout}"
+                if not container_root_exists(mountpoint):
+                    logger.info(
+                        "No container root directory in the mountpoint %s", mountpoint
                     )
-                    log_writer.write("")
+                    continue
 
-        # Clean up
-        unmount_disk = ["umount", DISK_MOUNT_DIR]
-        subprocess.run(unmount_disk, capture_output=False, check=True)
+                drift_data: list[dict] = run_container_drift(
+                    input_file, output_path, log_file, mountpoint
+                )
+                if not drift_data:
+                    logger.info(
+                        "No container drift for containers in mountpoint %s", mountpoint
+                    )
+                    log_entry(
+                        log_file, "No container drift for containers in input file."
+                    )
+                    continue
 
-        # combined and pretty output
-        if drifts:
-            combined_output = create_output_file(
-                output_path, display_name="container_drift", extension="json"
-            )
+                drift_output_files: list[dict] = _create_drift_output_files(
+                    output_path, drift_data
+                )
+                output_files.extend(drift_output_files)
 
-            with open(combined_output.path, "w", encoding="utf-8") as f:
-                json.dump(drifts, f, indent=4)
+        except RuntimeError as e:
+            logger.error("Disk mounting error encountered: %s", str(e))
+        finally:
+            logger.debug("Unmounting disk %s", input_file_path)
+            bd.umount()
+        logger.debug("Proceessing input %s completed", input_file_path)
 
-            output_files.append(combined_output.to_dict())
-
-    # Clean disk
-    if temp_dir:
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-
-    if not output_files:
-        with open(log_file.path, "a", encoding="utf-8") as log_writer:
-            log_writer.write("container drift did not generate output")
-            log_writer.write("")
-
-    # Add log file to output
-    output_files.append(log_file.to_dict())
+    report: Report = create_task_report(output_files)
 
     return create_task_result(
         output_files=output_files,
         workflow_id=workflow_id,
-        command=(
-            "/opt/container-explorer/bin/ce [--docker-managed] --output json "
-            "--image-root /mnt drift"
-        ),
+        task_files=task_files,
+        task_report=report.to_dict(),
     )
+
+
+def create_task_report(output_files: list[dict], content: str = "") -> Report:
+    """Creates task report"""
+    report: Report = Report("Container Drift Report")
+    report_section: MarkdownDocumentSection = report.add_section()
+
+    report_section.add_bullet(f"{len(output_files)} output files created")
+
+    record_count: int = 0
+
+    for output_file in output_files:
+        output_file_path: str = output_file.get("path", "")
+        if not output_file_path:
+            logger.info("No file path to process")
+            continue
+
+        if ".json" not in output_file_path:
+            continue
+
+        with open(output_file_path, "r", encoding="utf-8") as json_file:
+            data: list[dict] = json.loads(json_file.read())
+            record_count += len(data)
+
+    report_section.add_bullet(f"{record_count} files added, modified, or deleted")
+
+    if content:
+        report.add_section().add_paragraph(content)
+
+    return report
+
+
+def _create_drift_output_files(output_path: str, data: list[dict]) -> list[dict]:
+    """Returns OutpuFile for container drift."""
+    if not data:
+        logger.info("Creating drift output - no data provided")
+        return []
+
+    drift_output_files: list[dict] = []
+
+    json_output_file: OutputFile = create_output_file(
+        output_base_path=output_path, display_name="container_drift", extension="json"
+    )
+    with open(json_output_file.path, "w", encoding="utf-8") as file_handler:
+        json.dump(data, file_handler)
+    drift_output_files.append(json_output_file.to_dict())
+
+    csv_output_file: OutputFile = create_output_file(
+        output_base_path=output_path, display_name="container_drift", extension="csv"
+    )
+    with open(csv_output_file.path, "w", newline="") as csvfile:
+        csv_writer = csv.writer(csvfile)
+        if isinstance(data, list):
+            header = data[0].keys()
+            csv_writer.writerow(header)
+
+            for row in data:
+                csv_writer.writerow(row.values())
+    drift_output_files.append(csv_output_file.to_dict())
+
+    return drift_output_files
+
+
+def run_container_drift(
+    input_file: dict[str, Any], output_path: str, log_file: OutputFile, mountpoint: str
+) -> list[dict]:
+    """Run container drift on input file and return container drift data."""
+    drift_data: list[dict] = []
+
+    # Temporary directory to save the container drift output file produced by container-explorer
+    temp_dir: str = os.path.join(output_path, uuid4().hex)
+    os.mkdir(temp_dir)
+    logger.debug("Created temp directory to store container drift output %s", temp_dir)
+
+    # TODO(rmaskey): Update container-explorer to run container drift on Docker and containerd using
+    # single command.
+    #
+    # container drift must be run for containerd and Docker separately.
+    containerd_drift_data: list[dict] = _run_containerd_drift(mountpoint, temp_dir)
+    if containerd_drift_data:
+        drift_data.extend(containerd_drift_data)
+
+    docker_drift_data: list[dict] = _run_docker_drift(mountpoint, temp_dir)
+    if docker_drift_data:
+        drift_data.extend(docker_drift_data)
+
+    # Clean up temporary directory
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+
+    return drift_data
+
+
+def _run_containerd_drift(mountpoint: str, temp_dir: str) -> list[dict]:
+    """Run containerd drift and return drift data."""
+    output_file: OutputFile = create_output_file(
+        output_base_path=temp_dir, display_name="containerd_drift", extension="json"
+    )
+
+    command: list[str] = [
+        CE_BINARY,
+        "--image-root",
+        mountpoint,
+        "--output-file",
+        output_file.path,
+        "--output",
+        "json",
+        "drift",
+    ]
+
+    return _run_container_explorer(command, output_file.path)
+
+
+def _run_docker_drift(mountpoint: str, temp_dir: str) -> list[dict]:
+    """Run containerd drift and return drift data."""
+    output_file: OutputFile = create_output_file(
+        output_base_path=temp_dir, display_name="docker_drift", extension="json"
+    )
+
+    command: list[str] = [
+        CE_BINARY,
+        "--docker-managed",
+        "--image-root",
+        mountpoint,
+        "--output-file",
+        output_file.path,
+        "--output",
+        "json",
+        "drift",
+    ]
+
+    return _run_container_explorer(command, output_file.path)
+
+
+def _run_container_explorer(command: list[str], output_file_path: str) -> list[dict]:
+    """Run container-explorer and return the output."""
+    try:
+        logger.debug("Running container-explorer command: %s", " ".join(command))
+
+        process: subprocess.CompletedProcess = subprocess.run(
+            command, capture_output=True, check=False, text=True
+        )
+        if process.returncode != 0:
+            logger.error("container-explorer ran with error: %s", process.stderr)
+            return []
+
+        logger.debug("container-explorer ran successfully")
+        return _get_container_drift_data(output_file_path)
+
+    except subprocess.CalledProcessError as e:
+        logger.error("Error running container-explorer command: %s", str(e))
+        return []
+
+
+def _get_container_drift_data(path: str) -> list[dict]:
+    """Returns container drift data on file."""
+    try:
+        with open(path, "r", encoding="utf-8") as file_handler:
+            data: list[dict] = json.loads(file_handler.read())
+            return _flattern_container_drift_data(data)
+    except FileNotFoundError as e:
+        logger.error(
+            "File %s container container drift output does not exist: %s", path, str(e)
+        )
+        return []
+    except json.decoder.JSONDecodeError as e:
+        logger.error("Error loading container drift output from %s: %s", path, str(e))
+        return []
+
+
+def _flattern_container_drift_data(data: list[dict]) -> list[dict]:
+    """Reads nested container drift data and returns the flattern dict."""
+    if not data:
+        logger.debug("No data provided to process.")
+        return []
+
+    drift_data: list[dict] = []
+
+    for item in data:
+        container_id: str = item.get("ContainerID", "")
+        container_type: str = item.get("ContainerType", "")
+
+        added_or_modified_files: list[dict] | None = item.get("AddedOrModified")
+
+        # Handling edge cases where added_or_modified_files may container unexpected data.
+        if added_or_modified_files and isinstance(added_or_modified_files, list):
+            for file_info in added_or_modified_files:
+                drift_data.append(
+                    _create_drift_record(
+                        container_id,
+                        container_type,
+                        "File added or modified",
+                        file_info,
+                    )
+                )
+
+        inaccessible_files: list[dict] | None = item.get("InaccessibleFiles")
+
+        # Handling edge cases where inaccessible_files may container unexpected data.
+        if inaccessible_files and isinstance(inaccessible_files, list):
+            for file_info in inaccessible_files:
+                drift_data.append(
+                    _create_drift_record(
+                        container_id, container_type, "File deleted", file_info
+                    )
+                )
+
+    return drift_data
+
+
+def _create_drift_record(
+    container_id: str, container_type: str, drift_status: str, file_info: dict
+) -> dict:
+    """Create and return drift record."""
+    # Adding "-" for missing fields so exporting to csv is aligned.
+    file_name: str = file_info.get("file_name", "-")
+    full_path: str = file_info.get("full_path", "-")
+    file_size: str = str(file_info.get("file_size", "-"))
+    file_type: str = file_info.get("file_type", "-")
+    file_modified: str = file_info.get("file_modified", "-")
+    file_accessed: str = file_info.get("file_accessed", "-")
+    file_changed: str = file_info.get("file_changed", "-")
+    file_birth: str = file_info.get("file_birth", "-")
+    file_sha256: str = file_info.get("file_sha256", "-")
+
+    return {
+        "container_id": container_id,
+        "container_type": container_type,
+        "drift_status": drift_status,
+        "file_name": file_name,
+        "file_path": full_path,
+        "file_size": file_size,
+        "file_type": file_type,
+        "file_modified": file_modified,
+        "file_accessed": file_accessed,
+        "file_changed": file_changed,
+        "file_birth": file_birth,
+        "file_sha256": file_sha256,
+    }
