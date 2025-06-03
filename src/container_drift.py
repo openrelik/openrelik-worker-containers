@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
+"""Shows filesystem files and directories changes in containers."""
+
 import csv
 import logging
 import json
@@ -179,7 +180,7 @@ def create_task_report(output_files: list[dict], content: str = "") -> Report:
     report: Report = Report("Container Drift Report")
     report_section: MarkdownDocumentSection = report.add_section()
 
-    report_section.add_bullet(f"{len(output_files)} output files created.")
+    report_section.add_bullet(f"{len(output_files)} output files created")
 
     record_count: int = 0
 
@@ -354,26 +355,30 @@ def _flattern_container_drift_data(data: list[dict]) -> list[dict]:
         container_id: str = item.get("ContainerID", "")
         container_type: str = item.get("ContainerType", "")
 
-        added_or_modified_files: list[dict] = item.get("AddedOrModified", [])
-        for file_info in added_or_modified_files:
-            drift_data.append(
-                _create_drift_record(
-                    container_id, container_type, "File added or modified", file_info
-                )
-            )
+        added_or_modified_files: list[dict] | None = item.get("AddedOrModified")
 
-        inaccessible_files: list[dict] = item.get("InaccessibleFiles", [])
+        # Handling edge cases where added_or_modified_files may container unexpected data.
+        if added_or_modified_files and isinstance(added_or_modified_files, list):
+            for file_info in added_or_modified_files:
+                drift_data.append(
+                    _create_drift_record(
+                        container_id,
+                        container_type,
+                        "File added or modified",
+                        file_info,
+                    )
+                )
+
+        inaccessible_files: list[dict] | None = item.get("InaccessibleFiles")
 
         # Handling edge cases where inaccessible_files may container unexpected data.
-        if not isinstance(inaccessible_files, list):
-            continue
-
-        for file_info in inaccessible_files:
-            drift_data.append(
-                _create_drift_record(
-                    container_id, container_type, "File deleted", file_info
+        if inaccessible_files and isinstance(inaccessible_files, list):
+            for file_info in inaccessible_files:
+                drift_data.append(
+                    _create_drift_record(
+                        container_id, container_type, "File deleted", file_info
+                    )
                 )
-            )
 
     return drift_data
 
