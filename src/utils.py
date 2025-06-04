@@ -145,7 +145,10 @@ def unmount_disk(mount_point: str, log_file: Optional[OutputFile] = None) -> Non
 
 
 def _mount_containerd_container(
-    container_id: str, container_root_dir: str, container_mount_dir: str
+    container_id: str,
+    container_namespace: str,
+    container_root_dir: str,
+    container_mount_dir: str,
 ) -> str | None:
     """Mounts specified containerd container and returns the container mount point.
 
@@ -157,8 +160,10 @@ def _mount_containerd_container(
     Returns:
         Path where container is mounted or None.
     """
-    containerd_mount_command = [
+    containerd_mount_command: List[str] = [
         CE_BINARY,
+        "--namespace",
+        container_namespace,
         "--containerd-root",
         container_root_dir,
         "mount",
@@ -214,7 +219,10 @@ def _mount_containerd_container(
 
 
 def _mount_docker_container(
-    container_id: str, container_root_dir: str, container_mount_dir: str
+    container_id: str,
+    container_namespace: str,
+    container_root_dir: str,
+    container_mount_dir: str,
 ) -> str | None:
     """Mounts specified containerd container and returns the container mount point.
 
@@ -226,8 +234,10 @@ def _mount_docker_container(
     Returns:
         Path where container is mounted or None.
     """
-    docker_mount_command = [
+    docker_mount_command: List[str] = [
         CE_BINARY,
+        "--namespace",
+        container_namespace,
         "--docker-managed",
         "--docker-root",
         container_root_dir,
@@ -244,7 +254,7 @@ def _mount_docker_container(
     logger.debug("Docker mount command: %s", " ".join(docker_mount_command))
 
     try:
-        process = subprocess.run(
+        process: subprocess.CompletedProcess[str] = subprocess.run(
             docker_mount_command,
             capture_output=True,
             check=False,
@@ -285,7 +295,10 @@ def _mount_docker_container(
 
 
 def _mount_container(
-    container_id: str, container_root_dir: str, container_mount_dir: str
+    container_id: str,
+    container_namespace: str,
+    container_root_dir: str,
+    container_mount_dir: str,
 ) -> str | None:
     """Mounts specified container ID and returns the container mount point.
 
@@ -305,15 +318,15 @@ def _mount_container(
         return None
 
     # Try mounting as containerd container
-    returned_container_mount_dir = _mount_containerd_container(
-        container_id, container_root_dir, container_mount_dir
+    returned_container_mount_dir: str | None = _mount_containerd_container(
+        container_id, container_namespace, container_root_dir, container_mount_dir
     )
     if returned_container_mount_dir:
         return returned_container_mount_dir
 
     # Try mounting as Docker container
     returned_container_mount_dir = _mount_docker_container(
-        container_id, container_root_dir, container_mount_dir
+        container_id, container_namespace, container_root_dir, container_mount_dir
     )
     if returned_container_mount_dir:
         return returned_container_mount_dir
@@ -323,6 +336,7 @@ def _mount_container(
 
 def mount_container(
     container_id: str,
+    container_namespace: str,
     disk_mount_dir: str,
     container_mount_dir: str,
     container_root_dir: Optional[str] = None,
@@ -348,8 +362,8 @@ def mount_container(
         container_root_path = os.path.join(disk_mount_dir, container_root_dir)
         logger.info("Using custom container root path: %s", container_root_path)
 
-        _container_mount_dir = _mount_container(
-            container_id, container_root_path, container_mount_dir
+        _container_mount_dir: str | None = _mount_container(
+            container_id, container_namespace, container_root_path, container_mount_dir
         )
         if _container_mount_dir:
             return _container_mount_dir
@@ -367,7 +381,7 @@ def mount_container(
     container_root_path = os.path.join(disk_mount_dir, "var", "lib", "containerd")
     logger.info("Trying default containerd root path: %s", container_root_path)
     _container_mount_dir = _mount_container(
-        container_id, container_root_path, container_mount_dir
+        container_id, container_namespace, container_root_path, container_mount_dir
     )
     if _container_mount_dir:
         return _container_mount_dir
@@ -379,13 +393,63 @@ def mount_container(
     container_root_path = os.path.join(disk_mount_dir, "var", "lib", "docker")
     logger.info("Trying default Docker root path: %s", container_root_path)
     _container_mount_dir = _mount_container(
-        container_id, container_root_path, container_mount_dir
+        container_id, container_namespace, container_root_path, container_mount_dir
     )
     if _container_mount_dir:
         return _container_mount_dir
     logger.info("Mount attempt failed for default Docker path %s", container_root_path)
 
     logger.error("Failed to mount container %s using default paths.", container_id)
+    return None
+
+
+def unmount_container(
+    container_id: str, container_mount_dir: str, log_file: Optional[OutputFile] = None
+) -> None:
+    """Safely unmounts a container mount points."""
+    if not container_mount_dir or not os.path.ismount(container_mount_dir):
+        logger.debug(
+            "Container mountpoint %s for container %s does not exist",
+            container_mount_dir,
+            container_id,
+        )
+        return None
+
+    logger.info("Unmounting container mountpoint %s", container_mount_dir)
+    unmount_command: list[str] = ["umount", container_mount_dir]
+    try:
+        process: subprocess.CompletedProcess[str] = subprocess.run(
+            unmount_command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=60,
+        )
+        if process.returncode == 0:
+            logger.info(
+                "Successfully unmounted container mountpoint %s", container_mount_dir
+            )
+        else:
+            logger.error(
+                "Error unmounting container %s mountpoint %s",
+                container_id,
+                container_mount_dir,
+            )
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout expired while unmounting %s", container_mount_dir)
+    except Exception as e:
+        logger.error(
+            "Exception occurred while unmounting: %s: %s",
+            container_mount_dir,
+            e,
+            exc_info=True,
+        )
+        if log_file:
+            log_entry(
+                log_file,
+                f"Exception occurred while unmounting: {container_mount_dir}: {e}",
+            )
+
     return None
 
 
