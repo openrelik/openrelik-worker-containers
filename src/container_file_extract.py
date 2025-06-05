@@ -453,7 +453,9 @@ def _extract_file_and_directory(
     return extracted_output_files
 
 
-def _extract_regular_file(output_path: str, file_path: str) -> dict[str, Any]:
+def _extract_regular_file(
+    output_path: str, file_path: str, original_path: str = ""
+) -> dict[str, Any]:
     """Extract a regular file"""
     logger.debug("Extracting a regular file %s", file_path)
 
@@ -464,12 +466,17 @@ def _extract_regular_file(output_path: str, file_path: str) -> dict[str, Any]:
     output_file: OutputFile = create_output_file(
         output_base_path=output_path,
         display_name=file_name_no_extension,
-        original_path=file_path,
         extension=file_extension,
     )
 
+    if original_path:
+        output_file.original_path = original_path
+
     try:
         shutil.copy(file_path, output_file.path)
+    except FileNotFoundError:
+        logger.error("File %s not found", file_path)
+        return {}
     except shutil.Error as e:
         logger.error("Error copying the file %s: %s", file_path, str(e))
         return {}
