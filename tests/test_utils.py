@@ -106,6 +106,7 @@ class TestContainerWorkerUtils(unittest.TestCase):
     def test_mount_containerd_container_success(self):
         """Test successful containerd container mount."""
         container_id = "abc123edf"
+        container_namespace = "default"
         container_root_dir = "/mnt/abcdef/var/lib/containerd"
         container_mount_dir = "/mnt/aabbcc"
 
@@ -116,14 +117,16 @@ class TestContainerWorkerUtils(unittest.TestCase):
             stderr="",
         )
 
-        result = _mount_containerd_container(
-            container_id, container_root_dir, container_mount_dir
+        result: str | None = _mount_containerd_container(
+            container_id, container_namespace, container_root_dir, container_mount_dir
         )
         self.assertEqual(result, container_mount_dir)
 
         self.mock_subprocess_run.assert_called_once_with(
             [
                 CE_BINARY,
+                "--namespace",
+                container_namespace,
                 "--containerd-root",
                 container_root_dir,
                 "mount",
@@ -144,6 +147,7 @@ class TestContainerWorkerUtils(unittest.TestCase):
     def test_mount_docker_container_success(self):
         """Test successful Docker container mount."""
         container_id = "abc123def"
+        container_namespace = "default"
         container_root_dir = "/mnt/abcdef/var/lib/docker"
         container_mount_dir = "/mnt/aabbcc"
 
@@ -154,14 +158,16 @@ class TestContainerWorkerUtils(unittest.TestCase):
             stderr="",
         )
 
-        result = _mount_docker_container(
-            container_id, container_root_dir, container_mount_dir
+        result: str | None = _mount_docker_container(
+            container_id, container_namespace, container_root_dir, container_mount_dir
         )
         self.assertEqual(result, container_mount_dir)
 
         self.mock_subprocess_run.assert_called_once_with(
             [
                 CE_BINARY,
+                "--namespace",
+                container_namespace,
                 "--docker-managed",
                 "--docker-root",
                 container_root_dir,

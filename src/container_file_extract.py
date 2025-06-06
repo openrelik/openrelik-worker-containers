@@ -223,7 +223,7 @@ def container_file_extraction(
             logger.debug("Unmounting disk %s", input_file_path)
             bd.umount()
 
-        logger.debug("Proceessing input %s completed", input_file_name)
+        logger.debug("Processing input %s completed", input_file_name)
     logger.debug("Completed processing %d input disks", len(input_files))
 
     logger.debug(
