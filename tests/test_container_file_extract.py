@@ -53,13 +53,13 @@ class TestContainerFileExtract(unittest.TestCase):
         mock_output_path: str = "/tmp/mock/output_path"
         if os.path.exists(mock_output_path):
             shutil.rmtree(mock_output_path)
-        os.mkdir(mock_output_path)
+        os.makedirs(mock_output_path)
         logger.debug("Mock output_path: %s", mock_output_path)
 
         mock_container_mount_dir: str = "/tmp/mock/container_mount_dir"
         if os.path.exists(mock_container_mount_dir):
             shutil.rmtree(mock_container_mount_dir)
-        os.mkdir(mock_container_mount_dir)
+        os.makedirs(mock_container_mount_dir)
         logger.debug("Mock container_mount_dir: %s", mock_container_mount_dir)
 
         mock_original_path: str = "/etc"
@@ -89,14 +89,14 @@ class TestContainerFileExtract(unittest.TestCase):
         mock_output_path: str = "/tmp/mock/output_path"
         if os.path.exists(mock_output_path):
             shutil.rmtree(mock_output_path)
-        os.mkdir(mock_output_path)
+        os.makedirs(mock_output_path)
         logger.debug("Mock output_path: %s", mock_output_path)
 
         mock_container_mount_dir: str = "/tmp/mock/container_mount_dir"
         if os.path.exists(mock_container_mount_dir):
             shutil.rmtree(mock_container_mount_dir)
-        os.mkdir(mock_container_mount_dir)
-        print("Mock container_mount_dir: %s", mock_container_mount_dir)
+        os.makedirs(mock_container_mount_dir)
+        logger.debug("Mock container_mount_dir: %s", mock_container_mount_dir)
 
         mock_original_path: str = "/invalid_path"
         logger.debug("Mock original_path: %s", mock_original_path)
@@ -127,14 +127,14 @@ class TestContainerFileExtract(unittest.TestCase):
         mock_output_path: str = "/tmp/mock/output_path"
         if os.path.exists(mock_output_path):
             shutil.rmtree(mock_output_path)
-        os.mkdir(mock_output_path)
+        os.makedirs(mock_output_path)
         logger.debug("Mock output_path: %s", mock_output_path)
 
         mock_container_mount_dir: str = "/tmp/mock/container_mount_dir"
         if os.path.exists(mock_container_mount_dir):
             shutil.rmtree(mock_container_mount_dir)
-        os.mkdir(mock_container_mount_dir)
-        print("Mock container_mount_dir: %s", mock_container_mount_dir)
+        os.makedirs(mock_container_mount_dir)
+        logger.debug("Mock container_mount_dir: %s", mock_container_mount_dir)
 
         mock_original_path: str = "/invalid_path"
         logger.debug("Mock original_path: %s", mock_original_path)
@@ -163,13 +163,13 @@ class TestContainerFileExtract(unittest.TestCase):
         mock_output_path: str = "/tmp/mock/output_path"
         if os.path.exists(mock_output_path):
             shutil.rmtree(mock_output_path)
-        os.mkdir(mock_output_path)
+        os.makedirs(mock_output_path)
         logger.debug("Mock output_path: %s", mock_output_path)
 
         mock_container_mount_dir: str = "/tmp/mock/container_mount_dir"
         if os.path.exists(mock_container_mount_dir):
             shutil.rmtree(mock_container_mount_dir)
-        os.mkdir(mock_container_mount_dir)
+        os.makedirs(mock_container_mount_dir)
         logger.debug("Mock container_mount_dir: %s", mock_container_mount_dir)
 
         mock_original_path: str = "/etc/passwd"
@@ -200,13 +200,13 @@ class TestContainerFileExtract(unittest.TestCase):
         mock_output_path: str = "/tmp/mock/output_path"
         if os.path.exists(mock_output_path):
             shutil.rmtree(mock_output_path)
-        os.mkdir(mock_output_path)
+        os.makedirs(mock_output_path)
         logger.debug("Mock output_path: %s", mock_output_path)
 
         mock_container_mount_dir: str = "/tmp/mock/container_mount_dir"
         if os.path.exists(mock_container_mount_dir):
             shutil.rmtree(mock_container_mount_dir)
-        os.mkdir(mock_container_mount_dir)
+        os.makedirs(mock_container_mount_dir)
         logger.debug("Mock container_mount_dir: %s", mock_container_mount_dir)
 
         mock_original_path: str = "/etc/invalid_file"
@@ -237,13 +237,13 @@ class TestContainerFileExtract(unittest.TestCase):
         mock_output_path: str = "/tmp/mock/output_path"
         if os.path.exists(mock_output_path):
             shutil.rmtree(mock_output_path)
-        os.mkdir(mock_output_path)
+        os.makedirs(mock_output_path, exist_ok=True)
         logger.debug("Mock output_path: %s", mock_output_path)
 
         mock_mountpoint: str = "/tmp/mock/mountpoint"
         if os.path.exists(mock_mountpoint):
             shutil.rmtree(mock_mountpoint)
-        os.mkdir(mock_mountpoint)
+        os.makedirs(mock_mountpoint)
         logger.debug("Mock mountpoint: %s", mock_mountpoint)
 
         # Path of files to extract.
