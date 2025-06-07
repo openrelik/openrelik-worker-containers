@@ -100,7 +100,7 @@ def _mount_containerd_container(
             )
             return container_mount_dir
         else:
-            logger.warning(
+            logger.error(
                 "Failed to mount as containerd container %s from %s. Stderr: %s",
                 container_id,
                 container_root_dir,
@@ -176,10 +176,9 @@ def _mount_docker_container(
             return container_mount_dir
         else:
             logger.error(
-                "Failed to mount as Docker container %s from %s. Return code: %d, Stderr: %s",
+                "Failed to mount as Docker container %s from %s. Stderr: %s",
                 container_id,
                 container_root_dir,
-                process.returncode,
                 process.stderr.strip(),
             )
     except subprocess.TimeoutExpired:
@@ -341,6 +340,7 @@ def unmount_container(
                 container_id,
                 container_mount_dir,
             )
+
     except subprocess.TimeoutExpired:
         logger.error("Timeout expired while unmounting %s", container_mount_dir)
     except Exception as e:
