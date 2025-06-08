@@ -30,6 +30,7 @@ from src.utils import (
     _mount_container,
     CE_BINARY,
     container_root_exists,
+    log_entry,
     mount_container,
     unmount_container,
 )
@@ -85,7 +86,7 @@ class TestContainerWorkerUtils(unittest.TestCase):
         self.patcher_os_path_ismount.stop()
         self.patcher_os_path_exists.stop()
 
-    def test_mount_containerd_container_success(self) -> None:
+    def test__mount_containerd_container_success(self) -> None:
         """Test successful containerd container mount."""
         container_id: str = "abc123edf"
         container_namespace: str = "default"
@@ -115,7 +116,7 @@ class TestContainerWorkerUtils(unittest.TestCase):
                 container_mount_dir,
             ],
             capture_output=True,
-            check=False,
+            check=True,
             text=True,
             timeout=60,
         )
@@ -125,17 +126,30 @@ class TestContainerWorkerUtils(unittest.TestCase):
             container_mount_dir,
         )
 
-    def test_mount_containerd_container_failure(self) -> None:
+    def test__mount_containerd_container_failure(self) -> None:
         """Test failed containerd container mount."""
         container_id: str = "abc123edf"
         container_namespace: str = "default"
         container_root_dir: str = "/mnt/abcdef/var/lib/containerd"
         container_mount_dir: str = "/mnt/aabbcc"
 
-        self.mock_subprocess_run.return_value = mock.MagicMock(
+        container_command: list[str] = [
+            CE_BINARY,
+            "--namespace",
+            container_namespace,
+            "--containerd-root",
+            container_root_dir,
+            "mount",
+            container_id,
+            container_mount_dir,
+        ]
+
+        expected_stderr: str = "mount command failed internally"
+
+        self.mock_subprocess_run.side_effect = subprocess.CalledProcessError(
             returncode=1,
-            stdout="",
-            stderr="mount error",
+            cmd=" ".join(container_command),
+            stderr=expected_stderr,
         )
 
         result: str | None = _mount_containerd_container(
@@ -144,29 +158,20 @@ class TestContainerWorkerUtils(unittest.TestCase):
         self.assertIsNone(result)
 
         self.mock_subprocess_run.assert_called_once_with(
-            [
-                CE_BINARY,
-                "--namespace",
-                container_namespace,
-                "--containerd-root",
-                container_root_dir,
-                "mount",
-                container_id,
-                container_mount_dir,
-            ],
+            container_command,
             capture_output=True,
-            check=False,
+            check=True,
             text=True,
             timeout=60,
         )
         self.mock_logger.error.assert_any_call(
-            "Failed to mount as containerd container %s from %s. Stderr: %s",
+            "Container explorer failed to mount containerd container %s at %s with error %s.",
             container_id,
             container_root_dir,
-            "mount error",
+            expected_stderr,
         )
 
-    def test_mount_containerd_container_timeout(self) -> None:
+    def test__mount_containerd_container_timeout(self) -> None:
         """Test containerd container mount exceptions."""
         container_id: str = "abc123edf"
         container_namespace: str = "default"
@@ -200,30 +205,117 @@ class TestContainerWorkerUtils(unittest.TestCase):
             container_root_dir,
         )
 
-    def test_mount_containerd_container_exception(self) -> None:
+    def test__mount_containerd_container_file_not_found(self) -> None:
+        """Test containerd container mount when subprocess.run raises FileNotFoundError."""
+        container_id: str = "abc123edf"
+        container_namespace: str = "default"
+        container_root_dir: str = "/mnt/abcdef/var/lib/containerd"
+        container_mount_dir: str = "/mnt/aabbcc"
+
+        container_command: list[str] = [
+            CE_BINARY,
+            "--namespace",
+            container_namespace,
+            "--containerd-root",
+            container_root_dir,
+            "mount",
+            container_id,
+            container_mount_dir,
+        ]
+
+        self.mock_subprocess_run.side_effect = FileNotFoundError(
+            2, "No such file or directory", CE_BINARY
+        )
+
+        result: str | None = _mount_containerd_container(
+            container_id, container_namespace, container_root_dir, container_mount_dir
+        )
+        self.assertIsNone(result)
+
+        self.mock_subprocess_run.assert_called_once_with(
+            container_command, capture_output=True, check=True, text=True, timeout=60
+        )
+        self.mock_logger.error.assert_any_call(
+            "Container explorer binary %s does not exist.", CE_BINARY
+        )
+
+    def test__mount_containerd_container_permission_error(self) -> None:
+        """Test containerd container mount when subprocess.run raises PermissionError."""
+        container_id: str = "abc123edf"
+        container_namespace: str = "default"
+        container_root_dir: str = "/mnt/abcdef/var/lib/containerd"
+        container_mount_dir: str = "/mnt/aabbcc"
+
+        container_command: list[str] = [
+            CE_BINARY,
+            "--namespace",
+            container_namespace,
+            "--containerd-root",
+            container_root_dir,
+            "mount",
+            container_id,
+            container_mount_dir,
+        ]
+
+        self.mock_subprocess_run.side_effect = PermissionError("Permission denied")
+
+        result: str | None = _mount_containerd_container(
+            container_id, container_namespace, container_root_dir, container_mount_dir
+        )
+        self.assertIsNone(result)
+
+        self.mock_subprocess_run.assert_called_once_with(
+            container_command,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=60,
+        )
+        self.mock_logger.error.assert_any_call(
+            "Permission denied to execute container-explorer binary."
+        )
+
+    def test__mount_containerd_container_exception(self) -> None:
         """Test containerd container mount exceptions."""
         container_id: str = "abc123edf"
         container_namespace: str = "default"
         container_root_dir: str = "/mnt/abcdef/var/lib/containerd"
         container_mount_dir: str = "/mnt/aabbcc"
 
-        expected_exception = Exception("Test exception")
+        expected_exception = Exception("A very generic unhandled test exception")
+
+        container_command: list[str] = [
+            CE_BINARY,
+            "--namespace",
+            container_namespace,
+            "--containerd-root",
+            container_root_dir,
+            "mount",
+            container_id,
+            container_mount_dir,
+        ]
 
         self.mock_subprocess_run.side_effect = expected_exception
-        result: str | None = _mount_containerd_container(
-            container_id, container_namespace, container_root_dir, container_mount_dir
-        )
-        self.assertIsNone(result)
-        self.mock_subprocess_run.assert_called_once()
-        self.mock_logger.error.assert_any_call(
-            "Exception occurred while mounting containerd container %s from %s: %s",
-            container_id,
-            container_root_dir,
-            expected_exception,
-            exc_info=True,
+
+        with self.assertRaises(Exception) as context_manager:
+            _mount_containerd_container(
+                container_id,
+                container_namespace,
+                container_root_dir,
+                container_mount_dir,
+            )
+
+        self.assertIs(context_manager.exception, expected_exception)
+
+        self.mock_subprocess_run.assert_called_once_with(
+            container_command,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=60,
         )
 
-    def test_mount_docker_container_success(self) -> None:
+    def test__mount_docker_container_success(self) -> None:
         """Test successful Docker container mount."""
         container_id: str = "abc123def"
         container_namespace: str = "default"
@@ -254,7 +346,7 @@ class TestContainerWorkerUtils(unittest.TestCase):
                 container_mount_dir,
             ],
             capture_output=True,
-            check=False,
+            check=True,
             text=True,
             timeout=60,
         )
@@ -264,17 +356,29 @@ class TestContainerWorkerUtils(unittest.TestCase):
             container_mount_dir,
         )
 
-    def test_mount_docker_container_failure(self) -> None:
+    def test__mount_docker_container_failure(self) -> None:
         """Test failed Docker container mount."""
         container_id: str = "abc123def"
         container_namespace: str = "default"
         container_root_dir: str = "/mnt/abcdef/var/lib/docker"
         container_mount_dir: str = "/mnt/aabbcc"
 
-        self.mock_subprocess_run.return_value = mock.MagicMock(
-            returncode=1,
-            stdout="",
-            stderr="mount error",
+        container_command: list[str] = [
+            CE_BINARY,
+            "--namespace",
+            container_namespace,
+            "--docker-managed",
+            "--docker-root",
+            container_root_dir,
+            "mount",
+            container_id,
+            container_mount_dir,
+        ]
+
+        expected_stderr: str = "mount command failed internally"
+
+        self.mock_subprocess_run.side_effect = subprocess.CalledProcessError(
+            returncode=1, cmd=" ".join(container_command), stderr=expected_stderr
         )
 
         result: str | None = _mount_docker_container(
@@ -283,30 +387,20 @@ class TestContainerWorkerUtils(unittest.TestCase):
         self.assertIsNone(result)
 
         self.mock_subprocess_run.assert_called_once_with(
-            [
-                CE_BINARY,
-                "--namespace",
-                container_namespace,
-                "--docker-managed",
-                "--docker-root",
-                container_root_dir,
-                "mount",
-                container_id,
-                container_mount_dir,
-            ],
+            container_command,
             capture_output=True,
-            check=False,
+            check=True,
             text=True,
             timeout=60,
         )
         self.mock_logger.error.assert_any_call(
-            "Failed to mount as Docker container %s from %s. Stderr: %s",
+            "Container explorer failed to mount Docker container %s at %s with error %s.",
             container_id,
             container_root_dir,
-            "mount error",
+            expected_stderr,
         )
 
-    def test_mount_docker_container_timeout(self) -> None:
+    def test__mount_docker_container_timeout(self) -> None:
         """Test failed Docker container mount."""
         container_id: str = "abc123def"
         container_namespace: str = "default"
@@ -341,29 +435,120 @@ class TestContainerWorkerUtils(unittest.TestCase):
             container_root_dir,
         )
 
-    def test_mount_docker_container_exception(self) -> None:
-        """Test Docker container mount exception."""
+    def test__mount_docker_container_file_not_found(self) -> None:
+        """Test Docker container mount when subprocess.run raises FileNotFoundError."""
         container_id: str = "abc123def"
         container_namespace: str = "default"
         container_root_dir: str = "/mnt/abcdef/var/lib/docker"
         container_mount_dir: str = "/mnt/aabbcc"
 
-        expected_exception = Exception("Test exception")
+        container_command: list[str] = [
+            CE_BINARY,
+            "--namespace",
+            container_namespace,
+            "--docker-managed",
+            "--docker-root",
+            container_root_dir,
+            "mount",
+            container_id,
+            container_mount_dir,
+        ]
 
-        self.mock_subprocess_run.side_effect = expected_exception
+        self.mock_subprocess_run.side_effect = FileNotFoundError(
+            2, "No such file or directory", CE_BINARY
+        )
 
         result: str | None = _mount_docker_container(
             container_id, container_namespace, container_root_dir, container_mount_dir
         )
         self.assertIsNone(result)
 
-        self.mock_subprocess_run.assert_called_once()
+        self.mock_subprocess_run.assert_called_once_with(
+            container_command,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=60,
+        )
         self.mock_logger.error.assert_any_call(
-            "Exception occurred while mounting Docker container %s from %s: %s",
-            container_id,
+            "Container explorer binary %s does not exist.", CE_BINARY
+        )
+
+    def test__mount_docker_container_permission_error(self) -> None:
+        """Test Docker container mount when subprocess.run raises PermissionError."""
+        container_id: str = "abc123def"
+        container_namespace: str = "default"
+        container_root_dir: str = "/mnt/abcdef/var/lib/docker"
+        container_mount_dir: str = "/mnt/aabbcc"
+
+        container_command: list[str] = [
+            CE_BINARY,
+            "--namespace",
+            container_namespace,
+            "--docker-managed",
+            "--docker-root",
             container_root_dir,
-            expected_exception,
-            exc_info=True,
+            "mount",
+            container_id,
+            container_mount_dir,
+        ]
+
+        self.mock_subprocess_run.side_effect = PermissionError("Permission denied")
+
+        result: str | None = _mount_docker_container(
+            container_id, container_namespace, container_root_dir, container_mount_dir
+        )
+        self.assertIsNone(result)
+
+        self.mock_subprocess_run.assert_called_once_with(
+            container_command,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=60,
+        )
+        self.mock_logger.error.assert_any_call(
+            "Permission denied to execute container-explorer binary."
+        )
+
+    def test__mount_docker_container_exception(self) -> None:
+        """Test Docker container mount exception."""
+        container_id: str = "abc123def"
+        container_namespace: str = "default"
+        container_root_dir: str = "/mnt/abcdef/var/lib/docker"
+        container_mount_dir: str = "/mnt/aabbcc"
+
+        expected_exception = Exception("A very generic unhandled test exception")
+
+        container_command: list[str] = [
+            CE_BINARY,
+            "--namespace",
+            container_namespace,
+            "--docker-managed",
+            "--docker-root",
+            container_root_dir,
+            "mount",
+            container_id,
+            container_mount_dir,
+        ]
+
+        self.mock_subprocess_run.side_effect = expected_exception
+
+        with self.assertRaises(Exception) as context_manager:
+            _mount_docker_container(
+                container_id,
+                container_namespace,
+                container_root_dir,
+                container_mount_dir,
+            )
+        self.assertIs(context_manager.exception, expected_exception)
+
+        self.mock_subprocess_run.assert_called_once_with(
+            container_command,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=60,
         )
 
     @patch("src.utils._mount_containerd_container")
@@ -546,6 +731,84 @@ class TestContainerWorkerUtils(unittest.TestCase):
         )
         self.mock_logger.info.assert_any_call(
             "Mount attempt failed for default Docker path %s", expected_docker_root
+        )
+
+    @patch("src.utils._mount_container")
+    def test_mount_container_custom_container_root_dir_valid(
+        self, mock_internal_mount_container
+    ) -> None:
+        """Test mount_container with a custom container root directory."""
+        container_id: str = "abc123def"
+        container_namespace: str = "default"
+        disk_mount_dir: str = "/mnt/disk_mount_dir"
+        container_mount_dir: str = "/mnt/container_mount_dir"
+        custom_container_root_dir: str = "/data/docker"
+
+        mock_internal_mount_container.return_value = container_mount_dir
+
+        result: str | None = mount_container(
+            container_id,
+            container_namespace,
+            disk_mount_dir,
+            container_mount_dir,
+            custom_container_root_dir,
+        )
+
+        self.assertEqual(result, container_mount_dir)
+
+        expected_custom_path: str = os.path.join(
+            disk_mount_dir, custom_container_root_dir
+        )
+
+        mock_internal_mount_container.assert_called_once_with(
+            container_id,
+            container_namespace,
+            expected_custom_path,
+            container_mount_dir,
+        )
+
+        self.mock_logger.info.assert_any_call(
+            "Using custom container root path: %s", expected_custom_path
+        )
+
+    @patch("src.utils._mount_container")
+    def test_mount_container_custom_container_root_dir_invalid(
+        self, mock_internal_mount_container
+    ) -> None:
+        """Test mount_container with an invalid custom container root directory."""
+        container_id: str = "abc123def"
+        container_namespace: str = "default"
+        disk_mount_dir: str = "/mnt/disk_mount_dir"
+        container_mount_dir: str = "/mnt/container_mount_dir"
+        custom_container_root_dir: str = "/data/docker"
+
+        mock_internal_mount_container.return_value = None
+
+        result: str | None = mount_container(
+            container_id,
+            container_namespace,
+            disk_mount_dir,
+            container_mount_dir,
+            custom_container_root_dir,
+        )
+
+        self.assertIsNone(result)
+
+        expected_custom_path: str = os.path.join(
+            disk_mount_dir, custom_container_root_dir
+        )
+
+        mock_internal_mount_container.assert_called_once_with(
+            container_id,
+            container_namespace,
+            expected_custom_path,
+            container_mount_dir,
+        )
+
+        self.mock_logger.error.assert_any_call(
+            "Failed to mount container %s from custom path %s",
+            container_id,
+            custom_container_root_dir,
         )
 
     @patch("src.utils.os.walk")
@@ -732,7 +995,7 @@ class TestContainerWorkerUtils(unittest.TestCase):
         self.mock_subprocess_run.assert_called_once_with(
             ["umount", container_mount_dir],
             capture_output=True,
-            check=False,
+            check=True,
             text=True,
             timeout=60,
         )
@@ -782,24 +1045,37 @@ class TestContainerWorkerUtils(unittest.TestCase):
             container_id,
         )
 
-    def test_unmount_container_failure_returncode(self) -> None:
+    def test_unmount_container_failure(self) -> None:
         """Test unmount_container when umount command fails."""
         container_id: str = "test_id"
         container_mount_dir: str = "/mnt/container123"
         self.mock_os_path_ismount.return_value = True
-        self.mock_subprocess_run.return_value = mock.MagicMock(
-            returncode=1, stderr="Error unmounting"
+
+        unmount_command: list[str] = [
+            "umount",
+            container_mount_dir,
+        ]
+
+        expected_stderr: str = "umount command failed internally"
+
+        self.mock_subprocess_run.side_effect = subprocess.CalledProcessError(
+            returncode=1, cmd=" ".join(unmount_command), stderr=expected_stderr
         )
 
         unmount_container(container_id, container_mount_dir)
 
-        self.mock_subprocess_run.assert_called_once()
-        self.mock_logger.error.assert_any_call(
-            "Error unmounting container %s mountpoint %s",
-            container_id,
-            container_mount_dir,
+        self.mock_subprocess_run.assert_called_once_with(
+            unmount_command,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=60,
         )
-        self.mock_log_entry.assert_not_called()
+        self.mock_logger.error.assert_any_call(
+            "Exception occurred while unmounting: %s: %s",
+            container_mount_dir,
+            expected_stderr,
+        )
 
     def test_unmount_container_timeout(self) -> None:
         """Test unmount_container when umount command times out."""
@@ -818,6 +1094,95 @@ class TestContainerWorkerUtils(unittest.TestCase):
             container_mount_dir,
         )
         self.mock_log_entry.assert_not_called()
+
+    @patch("src.utils.open", new_callable=mock.mock_open)
+    def test_log_entry_success(self, mock_open_file) -> None:
+        """Test successful log_entry."""
+        mock_log_file_instance = mock.MagicMock()
+        mock_log_file_instance.path = "/fake/output/test.log"
+        message: str = "This is a test log message."
+
+        log_entry(mock_log_file_instance, message)
+
+        mock_open_file.assert_called_once_with(
+            mock_log_file_instance.path, "a", encoding="utf-8"
+        )
+        # Check that write was called with the message and then with a newline
+        mock_open_file().write.assert_any_call(message)
+        mock_open_file().write.assert_any_call("\n")
+        self.mock_logger.error.assert_not_called()
+
+    @patch("src.utils.open", new_callable=mock.mock_open)
+    def test_log_entry_file_not_found_error(self, mock_open_file) -> None:
+        """Test log_entry with FileNotFoundError."""
+        mock_log_file_instance = mock.MagicMock()
+        mock_log_file_instance.path = "/fake/output/non_existent_dir/test.log"
+        message: str = "This message won't be written due to FileNotFoundError."
+        exception_instance = FileNotFoundError("File not found")
+
+        mock_open_file.side_effect = exception_instance
+
+        log_entry(mock_log_file_instance, message)
+
+        mock_open_file.assert_called_once_with(
+            mock_log_file_instance.path, "a", encoding="utf-8"
+        )
+        self.mock_logger.error.assert_called_once_with(
+            "Failed to write to log file %s: %s",
+            mock_log_file_instance.path,
+            exception_instance,
+        )
+        self.mock_logger.info.assert_called_once_with(
+            "Original log message: %s", message
+        )
+
+    @patch("src.utils.open", new_callable=mock.mock_open)
+    def test_log_entry_permission_error(self, mock_open_file) -> None:
+        """Test log_entry with PermissionError."""
+        mock_log_file_instance = mock.MagicMock()
+        mock_log_file_instance.path = "/fake/output/permission_denied.log"
+        message: str = "This message won't be written due to PermissionError."
+        exception_instance = PermissionError("Permission denied")
+
+        mock_open_file.side_effect = exception_instance
+
+        log_entry(mock_log_file_instance, message)
+
+        mock_open_file.assert_called_once_with(
+            mock_log_file_instance.path, "a", encoding="utf-8"
+        )
+        self.mock_logger.error.assert_called_once_with(
+            "Failed to write to log file %s: %s",
+            mock_log_file_instance.path,
+            exception_instance,
+        )
+        self.mock_logger.info.assert_called_once_with(
+            "Original log message: %s", message
+        )
+
+    @patch("src.utils.open", new_callable=mock.mock_open)
+    def test_log_entry_os_error(self, mock_open_file) -> None:
+        """Test log_entry with a generic OSError."""
+        mock_log_file_instance = mock.MagicMock()
+        mock_log_file_instance.path = "/fake/output/os_error.log"
+        message: str = "This message won't be written due to OSError."
+        exception_instance = OSError("Some OS error")
+
+        mock_open_file.side_effect = exception_instance
+
+        log_entry(mock_log_file_instance, message)
+
+        mock_open_file.assert_called_once_with(
+            mock_log_file_instance.path, "a", encoding="utf-8"
+        )
+        self.mock_logger.error.assert_called_once_with(
+            "Failed to write to log file %s: %s",
+            mock_log_file_instance.path,
+            exception_instance,
+        )
+        self.mock_logger.info.assert_called_once_with(
+            "Original log message: %s", message
+        )
 
 
 if __name__ == "__main__":

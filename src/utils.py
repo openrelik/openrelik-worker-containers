@@ -45,7 +45,7 @@ def log_entry(log_file: OutputFile, message: str) -> None:
         with open(log_file.path, "a", encoding="utf-8") as log_writer:
             log_writer.write(message)
             log_writer.write("\n")
-    except Exception as e:
+    except (FileNotFoundError, PermissionError, OSError) as e:
         logger.error("Failed to write to log file %s: %s", log_file.path, e)
         logger.info("Original log message: %s", message)
 
@@ -85,40 +85,36 @@ def _mount_containerd_container(
     logger.debug("Containerd mount command: %s", " ".join(containerd_mount_command))
 
     try:
-        process = subprocess.run(
+        subprocess.run(
             containerd_mount_command,
             capture_output=True,
-            check=False,
+            check=True,
             text=True,
             timeout=60,
         )
-        if process.returncode == 0:
-            logger.info(
-                "Successfully mounted containerd container %s at %s",
-                container_id,
-                container_mount_dir,
-            )
-            return container_mount_dir
-        else:
-            logger.error(
-                "Failed to mount as containerd container %s from %s. Stderr: %s",
-                container_id,
-                container_root_dir,
-                process.stderr.strip(),
-            )
+
+        logger.info(
+            "Successfully mounted containerd container %s at %s",
+            container_id,
+            container_mount_dir,
+        )
+        return container_mount_dir
+    except FileNotFoundError as e:
+        logger.error("Container explorer binary %s does not exist.", e.filename)
+    except PermissionError:
+        logger.error("Permission denied to execute container-explorer binary.")
     except subprocess.TimeoutExpired:
         logger.error(
             "Timeout expired while mounting containerd container %s from %s",
             container_id,
             container_root_dir,
         )
-    except Exception as e:
+    except subprocess.CalledProcessError as e:
         logger.error(
-            "Exception occurred while mounting containerd container %s from %s: %s",
+            "Container explorer failed to mount containerd container %s at %s with error %s.",
             container_id,
             container_root_dir,
-            e,
-            exc_info=True,
+            e.stderr,
         )
 
     return None
@@ -160,40 +156,36 @@ def _mount_docker_container(
     logger.debug("Docker mount command: %s", " ".join(docker_mount_command))
 
     try:
-        process: subprocess.CompletedProcess[str] = subprocess.run(
+        subprocess.run(
             docker_mount_command,
             capture_output=True,
-            check=False,
+            check=True,
             text=True,
             timeout=60,
         )
-        if process.returncode == 0:
-            logger.info(
-                "Successfully mounted Docker container %s at %s",
-                container_id,
-                container_mount_dir,
-            )
-            return container_mount_dir
-        else:
-            logger.error(
-                "Failed to mount as Docker container %s from %s. Stderr: %s",
-                container_id,
-                container_root_dir,
-                process.stderr.strip(),
-            )
+
+        logger.info(
+            "Successfully mounted Docker container %s at %s",
+            container_id,
+            container_mount_dir,
+        )
+        return container_mount_dir
+    except FileNotFoundError as e:
+        logger.error("Container explorer binary %s does not exist.", e.filename)
+    except PermissionError:
+        logger.error("Permission denied to execute container-explorer binary.")
     except subprocess.TimeoutExpired:
         logger.error(
             "Timeout expired while mounting Docker container %s from %s",
             container_id,
             container_root_dir,
         )
-    except Exception as e:
+    except subprocess.CalledProcessError as e:
         logger.error(
-            "Exception occurred while mounting Docker container %s from %s: %s",
+            "Container explorer failed to mount Docker container %s at %s with error %s.",
             container_id,
             container_root_dir,
-            e,
-            exc_info=True,
+            e.stderr,
         )
 
     return None
@@ -323,38 +315,25 @@ def unmount_container(
     logger.info("Unmounting container mountpoint %s", container_mount_dir)
     unmount_command: list[str] = ["umount", container_mount_dir]
     try:
-        process: subprocess.CompletedProcess[str] = subprocess.run(
+        subprocess.run(
             unmount_command,
             capture_output=True,
-            check=False,
+            check=True,
             text=True,
             timeout=60,
         )
-        if process.returncode == 0:
-            logger.info(
-                "Successfully unmounted container mountpoint %s", container_mount_dir
-            )
-        else:
-            logger.error(
-                "Error unmounting container %s mountpoint %s",
-                container_id,
-                container_mount_dir,
-            )
 
+        logger.info(
+            "Successfully unmounted container mountpoint %s", container_mount_dir
+        )
     except subprocess.TimeoutExpired:
         logger.error("Timeout expired while unmounting %s", container_mount_dir)
-    except Exception as e:
+    except subprocess.CalledProcessError as e:
         logger.error(
             "Exception occurred while unmounting: %s: %s",
             container_mount_dir,
-            e,
-            exc_info=True,
+            e.stderr,
         )
-        if log_file:
-            log_entry(
-                log_file,
-                f"Exception occurred while unmounting: {container_mount_dir}: {e}",
-            )
 
     return None
 
