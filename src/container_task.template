@@ -20,7 +20,7 @@ import os
 import shutil
 import subprocess
 
-from typing import Any, List, Dict
+from typing import Any
 from uuid import uuid4
 
 
@@ -43,7 +43,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 TASK_NAME = "openrelik-worker-containers.tasks.container_template"
 
 # Task metadata for registration in the core system.
-TASK_METADATA: Dict[str, Any] = {
+TASK_METADATA: dict[str, Any] = {
     "display_name": "Container: <TASK_NAME>",
     "description": "<TASK_NAME> description",
 }
@@ -53,10 +53,10 @@ TASK_METADATA: Dict[str, Any] = {
 def container_list(
     self,
     pipe_result: str = "",
-    input_files: List[Dict] = [],
+    input_files: list[dict] = [],
     output_path: str = "",
     workflow_id: str = "",
-    task_config: Dict[str, Any] = {},
+    task_config: dict[str, Any] = {},
 ) -> str:
     """Container operation on input files.
 
@@ -76,10 +76,10 @@ def container_list(
     input_files = get_input_files(
         pipe_result, input_files or [], filter=COMPATIBLE_INPUTS
     )
-    output_files: List[Dict] = []
+    output_files: list[dict] = []
 
     # task_files contains dict of OutputFile for local use only.
-    task_files: List[Dict] = []
+    task_files: list[dict] = []
 
     # Log file to capture logs.
     log_file: OutputFile = create_output_file(
@@ -110,7 +110,7 @@ def container_list(
             bd = BlockDevice(input_file_path, max_mountpath_size=8)
             bd.setup()
 
-            mountpoints: List[str] = bd.mount()
+            mountpoints: list[str] = bd.mount()
             if not mountpoints:
                 logger.info("No mountpoints returned for disk %s", input_file_id)
                 logger.info("Unmounting the disk %s", input_file_id)
@@ -162,7 +162,7 @@ def container_list(
     )
 
 
-def create_task_report(output_files: List[Dict]) -> Report:
+def create_task_report(output_files: list[dict]) -> Report:
     """Create and return container task report."""
     report: Report = Report("Container <TASK_NAME> Report")
 

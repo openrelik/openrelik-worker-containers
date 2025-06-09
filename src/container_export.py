@@ -19,7 +19,7 @@ import os
 import shutil
 import subprocess
 
-from typing import Any, Dict, List
+from typing import Any
 from uuid import uuid4
 
 from openrelik_worker_common.file_utils import create_output_file, OutputFile
@@ -29,14 +29,14 @@ from openrelik_worker_common.task_utils import get_input_files
 from openrelik_worker_common.reporting import MarkdownDocumentSection, Report
 
 from .app import celery
-from .utils import CE_BINARY, log_entry
+from .utils import CE_BINARY, container_root_exists, log_entry
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
 # Container worker expects input file is a disk image with one of the following file extensions
 # specified in "filenames". Input files without expected file extensions are not processed.
-COMPATIBLE_INPUTS: Dict[str, Any] = {
+COMPATIBLE_INPUTS: dict[str, Any] = {
     "data_types": [],
     "mime_types": [],
     "filenames": ["*.img", "*.raw", "*.dd", "*.qcow3", "*.qcow2", "*.qcow"],
@@ -50,7 +50,7 @@ _ARCHIVE_EXT = ".tar.gz"  # Created when --archive flag is used.
 TASK_NAME = "openrelik-worker-containers.tasks.container_export"
 
 # Task metadata for registration in the core system.
-TASK_METADATA: Dict[str, Any] = {
+TASK_METADATA: dict[str, Any] = {
     "display_name": "Containers: Export Container",
     "description": (
         "Exports a container to either a raw disk image or an archive. If no container "
@@ -96,13 +96,13 @@ TASK_METADATA: Dict[str, Any] = {
 
 
 def export_container(
-    input_file: Dict[str, Any],
+    input_file: dict[str, Any],
     output_path: str,
     log_file: OutputFile,
     disk_mount_dir: str,
     container_id: str,
-    task_config: Dict[str, str],
-) -> List[OutputFile]:
+    task_config: dict[str, str],
+) -> list[OutputFile]:
     """Exports container as disk image or an archive file."""
     logger.info("Attempting to export container ID: %s", container_id)
 
@@ -111,7 +111,7 @@ def export_container(
     logger.debug("Created container export directory %s", container_export_dir)
 
     # TODO (rmaskey): Add support for non-default container root directory.
-    export_command: List[str] = [
+    export_command: list[str] = [
         CE_BINARY,
         "--support-container-data",
         "/opt/container-explorer/etc/supportcontainer.yaml",
@@ -133,7 +133,7 @@ def export_container(
     if "--image" not in export_command and "--archive" not in export_command:
         export_command.append("--image")
 
-    output_files: List[OutputFile] = []
+    output_files: list[OutputFile] = []
     logger.debug(
         "Running container-explorer export command %s", " ".join(export_command)
     )
@@ -143,7 +143,7 @@ def export_container(
             export_command, capture_output=True, check=False, text=True
         )
         if process.returncode == 0:
-            exported_containers: List[str] = os.listdir(container_export_dir)
+            exported_containers: list[str] = os.listdir(container_export_dir)
             for exported_container in exported_containers:
                 logger.debug(
                     "Exported container %s in export directory %s",
@@ -191,12 +191,12 @@ def export_container(
 
 
 def export_all_containers(
-    input_file: Dict[str, Any],
+    input_file: dict[str, Any],
     output_path: str,
     log_file: OutputFile,
     disk_mount_dir: str,
-    task_config: Dict[str, str],
-) -> List[OutputFile]:
+    task_config: dict[str, str],
+) -> list[OutputFile]:
     """Exports all containers disk image (.raw) or archive (.tar.gz)."""
     logger.info(
         "Attempting to export all containers on disk mounted at %s", disk_mount_dir
@@ -207,7 +207,7 @@ def export_all_containers(
     logger.debug("Created container export directory %s", container_export_dir)
 
     # TODO (rmaskey): Add support for non-default container root directory.
-    export_command: List[str] = [
+    export_command: list[str] = [
         CE_BINARY,
         "--support-container-data",
         "/opt/container-explorer/etc/supportcontainer.yaml",
@@ -233,7 +233,7 @@ def export_all_containers(
     if filter:
         export_command.extend(["--filter", filter])
 
-    output_files: List[OutputFile] = []
+    output_files: list[OutputFile] = []
 
     logger.debug(
         "Running container-explorer export command %s", " ".join(export_command)
@@ -244,7 +244,7 @@ def export_all_containers(
             export_command, capture_output=True, check=False, text=True
         )
         if process.returncode == 0:
-            exported_containers: List[str] = os.listdir(container_export_dir)
+            exported_containers: list[str] = os.listdir(container_export_dir)
             logger.debug(
                 "%d container output files in export directory %s",
                 len(exported_containers),
@@ -318,41 +318,14 @@ def export_all_containers(
     return output_files
 
 
-def _find_directory(root_dir: str, find_dirname: str) -> str:
-    """Find a directory name in the specified path."""
-    for dirpath, dirnames, _ in os.walk(root_dir):
-        if find_dirname in dirnames:
-            return os.path.join(dirpath, find_dirname)
-    return ""
-
-
-def container_root_exists(mountpoint: str) -> bool:
-    """Checks if mountpoint has default containerd or Docker root directory."""
-    container_root_dirnames: List[str] = ["docker", "containerd"]
-
-    for container_root_dirname in container_root_dirnames:
-        container_root_path: str = _find_directory(mountpoint, container_root_dirname)
-
-        # Containerd and Docker default root directories are /var/lib/containerd and /var/lib/docker
-        # Handling edge case where /var is a dedicated Linux partition.
-        if f"lib/{container_root_dirname}" in container_root_path:
-            container_root_files = os.listdir(container_root_path)
-            if (
-                "containers" in container_root_files
-                or "io.containerd.content.v1.content" in container_root_files
-            ):
-                return True
-    return False
-
-
 @celery.task(bind=True, name=TASK_NAME, metadata=TASK_METADATA)
 def container_export(
     self,
     pipe_result: str = "",
-    input_files: List[Any] = [],
+    input_files: list[Any] = [],
     output_path: str = "",
     workflow_id: str = "",
-    task_config: Dict[str, Any] = {},
+    task_config: dict[str, Any] = {},
 ) -> str:
     """Export containers as disk image, archive, or both.
 
@@ -371,10 +344,10 @@ def container_export(
         "Starting container export task ID: %s, Workflow ID: %s", task_id, workflow_id
     )
 
-    final_output_files: List[Any] = []
-    log_files: List[Any] = []
+    final_output_files: list[Any] = []
+    log_files: list[Any] = []
     temp_dir: str = ""
-    mountpoints: List[str] = []
+    mountpoints: list[str] = []
 
     input_files = get_input_files(
         pipe_result, input_files or [], filter=COMPATIBLE_INPUTS
@@ -398,7 +371,7 @@ def container_export(
             workflow_id=workflow_id,
         )
 
-    container_ids: List[str] = []
+    container_ids: list[str] = []
     container_ids_str: str = task_config.get("container_id", "")
     if container_ids_str:
         for container_id in container_ids_str.split(","):
@@ -418,7 +391,7 @@ def container_export(
         try:
             bd = BlockDevice(input_file.get("path"))
             bd.setup()
-            mountpoints: List[str] = bd.mount()
+            mountpoints: list[str] = bd.mount()
 
             if not mountpoints:
                 logger.info(
@@ -430,7 +403,7 @@ def container_export(
 
                 continue
 
-            export_files: List[OutputFile] = []
+            export_files: list[OutputFile] = []
 
             for mountpoint in mountpoints:
                 logger.debug(
@@ -458,7 +431,7 @@ def container_export(
                         "Procesing mountpoint %s to export all containers", mountpoint
                     )
 
-                    container_export_files: List[OutputFile] = export_all_containers(
+                    container_export_files: list[OutputFile] = export_all_containers(
                         input_file, output_path, log_file, mountpoint, task_config
                     )
                     if container_export_files:
@@ -483,7 +456,7 @@ def container_export(
                             container_id,
                         )
 
-                        container_export_files: List[OutputFile] = export_container(
+                        container_export_files: list[OutputFile] = export_container(
                             input_file,
                             output_path,
                             log_file,
@@ -532,7 +505,7 @@ def container_export(
     )
 
 
-def container_export_report(output_files: List[Dict]) -> Report:
+def container_export_report(output_files: list[dict]) -> Report:
     """Generates and returns container export report."""
     logger.debug("Generating container export report")
 

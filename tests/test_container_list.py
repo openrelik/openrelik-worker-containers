@@ -20,7 +20,6 @@ import os
 import unittest
 import tempfile
 
-from typing import Dict, List
 from unittest.mock import patch, mock_open, MagicMock
 
 
@@ -93,7 +92,7 @@ class TestContainerListTask(unittest.TestCase):
     def test_read_json_file(self):
         """Tests supporting function _read_json_file."""
         json_file: str = os.path.join("test_data", "container_list.json")
-        data: List[Dict] = _read_json_file(json_file)
+        data: list[dict] = _read_json_file(json_file)
 
         content: str = json.dumps(data, indent=4)
         content_hash: str = hashlib.md5(content.encode()).hexdigest()

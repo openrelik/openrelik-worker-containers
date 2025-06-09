@@ -20,7 +20,7 @@ import os
 import shutil
 import subprocess
 
-from typing import Any, List, Dict
+from typing import Any
 from uuid import uuid4
 
 from openrelik_worker_common.file_utils import create_output_file, OutputFile
@@ -43,7 +43,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 TASK_NAME = "openrelik-worker-containers.tasks.container_list"
 
 # Task metadata for registration in the core system.
-TASK_METADATA: Dict[str, Any] = {
+TASK_METADATA: dict[str, Any] = {
     "display_name": "ContainerExplorer: List Containers",
     "description": "List containerd and Docker containers",
 }
@@ -53,10 +53,10 @@ TASK_METADATA: Dict[str, Any] = {
 def container_list(
     self,
     pipe_result: str = "",
-    input_files: List[Dict] = [],
+    input_files: list[dict] = [],
     output_path: str = "",
     workflow_id: str = "",
-    task_config: Dict[str, Any] = {},
+    task_config: dict[str, Any] = {},
 ) -> str:
     """List containers on a disk.
 
@@ -78,10 +78,10 @@ def container_list(
     input_files = get_input_files(
         pipe_result, input_files or [], filter=COMPATIBLE_INPUTS
     )
-    output_files: List[Dict] = []
+    output_files: list[dict] = []
 
     # task_files contains dict of OutputFile for local use only.
-    task_files: List[Dict] = []
+    task_files: list[dict] = []
 
     # Log file to capture logs.
     log_file: OutputFile = create_output_file(
@@ -112,7 +112,7 @@ def container_list(
             bd = BlockDevice(input_file_path, max_mountpath_size=11)
             bd.setup()
 
-            mountpoints: List[str] = bd.mount()
+            mountpoints: list[str] = bd.mount()
             if not mountpoints:
                 logger.info("No mountpoints returned for disk %s", input_file_id)
                 logger.info("Unmounting the disk %s", input_file_id)
@@ -173,7 +173,7 @@ def container_list(
     )
 
 
-def create_task_report(output_files: List[Dict], content_filepath: str = "") -> Report:
+def create_task_report(output_files: list[dict], content_filepath: str = "") -> Report:
     """Create and return container list report."""
     logger.debug("Creating task report")
 
@@ -187,7 +187,7 @@ def create_task_report(output_files: List[Dict], content_filepath: str = "") -> 
     return report
 
 
-def create_markdown_report(output_path: str, output_files: List[Dict]) -> OutputFile:
+def create_markdown_report(output_path: str, output_files: list[dict]) -> OutputFile:
     """Create and return a markdown container list."""
     logger.debug("Creating list container markdown report")
 
@@ -211,7 +211,7 @@ def create_markdown_report(output_path: str, output_files: List[Dict]) -> Output
     )
 
     for output_file in output_files:
-        containers_info: List[Dict[str, Any]] = _read_json_file(
+        containers_info: list[dict[str, Any]] = _read_json_file(
             output_file.get("path", "")
         )
         for container_info in containers_info:
@@ -244,7 +244,7 @@ def create_markdown_report(output_path: str, output_files: List[Dict]) -> Output
 
 
 def list_containers(
-    input_file: Dict[str, Any], output_path: str, log_file: OutputFile, mountpoint: str
+    input_file: dict[str, Any], output_path: str, log_file: OutputFile, mountpoint: str
 ) -> OutputFile:
     """Returns an output file with container list information."""
     temp_dir: str = os.path.join(output_path, uuid4().hex)
@@ -254,7 +254,7 @@ def list_containers(
         temp_dir,
     )
 
-    containers_info: List[Dict] = []
+    containers_info: list[dict] = []
 
     containerd_output_file: OutputFile = create_output_file(
         temp_dir,
@@ -265,7 +265,7 @@ def list_containers(
 
     _list_containerd_containers(mountpoint, containerd_output_file.path)
 
-    containerd_containers_info: List[Dict[str, Any]] = _read_json_file(
+    containerd_containers_info: list[dict[str, Any]] = _read_json_file(
         containerd_output_file.path
     )
     if containerd_containers_info:
@@ -280,7 +280,7 @@ def list_containers(
 
     _list_docker_containers(mountpoint, docker_output_file.path)
 
-    docker_containers_info: List[Dict[str, Any]] = _read_json_file(
+    docker_containers_info: list[dict[str, Any]] = _read_json_file(
         docker_output_file.path
     )
     if docker_containers_info:
@@ -303,7 +303,7 @@ def list_containers(
 
 def _list_containerd_containers(mountpoint: str, container_output_file: str) -> None:
     """List containerd containers and save to output file."""
-    command: List[str] = [
+    command: list[str] = [
         CE_BINARY,
         "--image-root",
         mountpoint,
@@ -332,7 +332,7 @@ def _list_containerd_containers(mountpoint: str, container_output_file: str) -> 
 
 def _list_docker_containers(mountpoint: str, container_output_file: str) -> None:
     """List Docker containers and save to output file."""
-    command: List[str] = [
+    command: list[str] = [
         CE_BINARY,
         "--docker-managed",
         "--image-root",
@@ -360,7 +360,7 @@ def _list_docker_containers(mountpoint: str, container_output_file: str) -> None
         logger.debug("Error running container explorer process: %s", str(err))
 
 
-def _read_json_file(path: str) -> List[Dict]:
+def _read_json_file(path: str) -> list[dict]:
     """Reads JSON file.
 
     Args:
@@ -372,7 +372,7 @@ def _read_json_file(path: str) -> List[Dict]:
     if not os.path.exists(path):
         return []
 
-    data: List[Dict] = []
+    data: list[dict] = []
 
     with open(path, "r", encoding="utf-8") as file_handler:
         try:
@@ -383,7 +383,7 @@ def _read_json_file(path: str) -> List[Dict]:
     return data
 
 
-def _write_json_file(path: str, data: List[Dict[str, Any]]) -> None:
+def _write_json_file(path: str, data: list[dict[str, Any]]) -> None:
     """Write JSON data."""
     with open(path, "w", encoding="utf-8") as file_handler:
         json.dump(data, file_handler, indent=4)
