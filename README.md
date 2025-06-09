@@ -52,7 +52,7 @@ local Docker image.
 
 ### Using Pre-built Docker Image
 
-Update the `docker-compose.yml` to include `openrelik-worker-containers`.
+Update the `docker-compose.yml` to include `openrelik-worker-containers` stable release from OpenRelik container registry.
 
 ```yaml
 openrelik-worker-containers:
@@ -60,12 +60,11 @@ openrelik-worker-containers:
   image: ghcr.io/openrelik/openrelik-worker-containers:${OPENRELIK_WORKER_CONTAINERS_VERSION}
   platform: linux/amd64
   privileged: true
-  cap_add:
-    - SYS_ADMIN
   restart: always
   environment:
     - REDIS_URL=redis://openrelik-redis:6379
   volumes:
+    - /dev:/dev
     - ./data:/usr/share/openrelik/data
   command: "celery --app=src.app worker --task-events --concurrency=2 --loglevel=INFO -Q openrelik-worker-containers"
 ```
@@ -96,12 +95,11 @@ openrelik-worker-containers:
       image: openrelik-worker-containers:latest
       platform: linux/amd64
       privileged: true
-      cap_add:
-        - SYS_ADMIN
       restart: always
       environment:
         - REDIS_URL=redis://openrelik-redis:6379
       volumes:
+        - /dev:/dev
         - ./data:/usr/share/openrelik/data
       command: "celery --app=src.app worker --task-events --concurrency=2 --loglevel=INFO -Q openrelik-worker-containers"
     ```
@@ -126,12 +124,11 @@ openrelik-worker-containers:
       image: openrelik-worker-containers:latest
       platform: linux/amd64
       privileged: true
-      cap_add:
-        - SYS_ADMIN
       restart: always
       environment:
         - REDIS_URL=redis://openrelik-redis:6379
       volumes:
+        - /dev:/dev
         - ./data:/usr/share/openrelik/data
       command: "celery --app=src.app worker --task-events --concurrency=2 --loglevel=DEBUG -Q openrelik-worker-containers"
     ```
