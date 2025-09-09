@@ -162,6 +162,7 @@ def container_drift(
             logger.error("Disk mounting error encountered: %s", str(e))
         finally:
             logger.debug("Unmounting disk %s", input_file_path)
+            log_entry(log_file, f"Done processing {input_file_path}")
             bd.umount()
         logger.debug("Proceessing input %s completed", input_file_path)
 

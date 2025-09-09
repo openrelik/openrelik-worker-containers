@@ -491,6 +491,7 @@ def container_export(
 
         finally:
             logger.debug("Unmounting disk %s", input_file.get("id"))
+            log_entry(log_file, f"Done processing {input_file.get("path", "")}")
             bd.umount()
 
     logger.debug("Completed processing %d input disks", len(input_files))
