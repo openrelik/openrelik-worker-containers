@@ -156,6 +156,7 @@ def container_list(
             )
         finally:
             logger.debug("Unmounting disk %s", input_file_id)
+            log_entry(log_file, f"Done processing {input_file.get("path", "")}")
             bd.umount()
 
         logger.debug("Completed processing %d input disks", len(input_files))
