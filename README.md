@@ -69,6 +69,14 @@ openrelik-worker-containers:
   command: "celery --app=src.app worker --task-events --concurrency=2 --loglevel=INFO -Q openrelik-worker-containers"
 ```
 
+Add __one__ of the below environment variables to output structured JSON or Console logging.
+
+```yaml
+environment:
+    - OPENRELIK_LOG_TYPE=structlog
+    - OPENRELIK_LOG_TYPE=structlog_console
+```
+
 ### Building Local Image
 
 1. Clone `openrelik-worker-containers`.

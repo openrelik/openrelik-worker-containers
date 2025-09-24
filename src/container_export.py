@@ -14,7 +14,6 @@
 
 """Exports container to a `.raw` disk image or `.tar.gz` archive."""
 
-import logging
 import os
 import shutil
 import subprocess
@@ -22,6 +21,9 @@ import subprocess
 from typing import Any
 from uuid import uuid4
 
+from celery import signals
+from celery.utils.log import get_task_logger
+from openrelik_common.logging import Logger
 from openrelik_worker_common.file_utils import create_output_file, OutputFile
 from openrelik_worker_common.mount_utils import BlockDevice
 from openrelik_worker_common.task_utils import create_task_result
@@ -31,8 +33,6 @@ from openrelik_worker_common.reporting import MarkdownDocumentSection, Report
 from .app import celery
 from .utils import CE_BINARY, container_root_exists, log_entry
 
-# Set up logging
-logger = logging.getLogger(__name__)
 
 # Container worker expects input file is a disk image with one of the following file extensions
 # specified in "filenames". Input files without expected file extensions are not processed.
@@ -93,6 +93,18 @@ TASK_METADATA: dict[str, Any] = {
         },
     ],
 }
+
+log_root = Logger()
+logger = log_root.get_logger(__name__, get_task_logger(__name__))
+
+
+@signals.task_prerun.connect
+def on_task_prerun(sender, task_id, task, args, kwargs, **_):
+    log_root.bind(
+        task_id=task_id,
+        task_name=task.name,
+        worker_name=TASK_METADATA.get("display_name"),
+    )
 
 
 def export_container(
@@ -340,6 +352,7 @@ def container_export(
         Base64-encoded dictionary containing task results.
     """
     task_id = self.request.id
+    log_root.bind(workflow_id=workflow_id)
     logger.info(
         "Starting container export task ID: %s, Workflow ID: %s", task_id, workflow_id
     )
@@ -483,15 +496,16 @@ def container_export(
         except RuntimeError as err:
             logger.error("Error mounting disk image: %s", str(err))
 
-        except:
+        except Exception as err:
             logger.error(
-                "Encounted unexpected error while processing disk %s",
+                "Encounted unexpected error while processing disk %s - %s",
                 input_file.get("id"),
+                str(err),
             )
 
         finally:
             logger.debug("Unmounting disk %s", input_file.get("id"))
-            log_entry(log_file, f"Done processing {input_file.get("path", "")}")
+            log_entry(log_file, f"Done processing {input_file.get('path', '')}")
             bd.umount()
 
     logger.debug("Completed processing %d input disks", len(input_files))

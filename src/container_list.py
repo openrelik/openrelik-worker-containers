@@ -14,7 +14,6 @@
 
 """List containers on disk."""
 
-import logging
 import json
 import os
 import shutil
@@ -23,6 +22,10 @@ import subprocess
 from typing import Any
 from uuid import uuid4
 
+
+from celery import signals
+from celery.utils.log import get_task_logger
+from openrelik_common.logging import Logger
 from openrelik_worker_common.file_utils import create_output_file, OutputFile
 from openrelik_worker_common.mount_utils import BlockDevice
 from openrelik_worker_common.reporting import (
@@ -36,8 +39,6 @@ from openrelik_worker_common.task_utils import create_task_result, get_input_fil
 from .app import celery
 from .utils import CE_BINARY, COMPATIBLE_INPUTS, container_root_exists, log_entry
 
-# Set up logging
-logger: logging.Logger = logging.getLogger(__name__)
 
 # Task name used to register and route the task to the correct queue.
 TASK_NAME = "openrelik-worker-containers.tasks.container_list"
@@ -47,6 +48,18 @@ TASK_METADATA: dict[str, Any] = {
     "display_name": "ContainerExplorer: List Containers",
     "description": "List containerd and Docker containers",
 }
+
+log_root = Logger()
+logger = log_root.get_logger(__name__, get_task_logger(__name__))
+
+
+@signals.task_prerun.connect
+def on_task_prerun(sender, task_id, task, args, kwargs, **_):
+    log_root.bind(
+        task_id=task_id,
+        task_name=task.name,
+        worker_name=TASK_METADATA.get("display_name"),
+    )
 
 
 @celery.task(bind=True, name=TASK_NAME, metadata=TASK_METADATA)
@@ -71,6 +84,7 @@ def container_list(
         Base64-encoded dictionary containing task results.
     """
     task_id: str = self.request.id
+    log_root.bind(workflow_id=workflow_id)
     logger.info(
         "Starting task (%s) in workflow (%s) to list containers", task_id, workflow_id
     )
@@ -156,7 +170,7 @@ def container_list(
             )
         finally:
             logger.debug("Unmounting disk %s", input_file_id)
-            log_entry(log_file, f"Done processing {input_file.get("path", "")}")
+            log_entry(log_file, f"Done processing {input_file.get('path', '')}")
             bd.umount()
 
         logger.debug("Completed processing %d input disks", len(input_files))

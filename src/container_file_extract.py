@@ -14,7 +14,6 @@
 
 """Exports files and directory archive from container."""
 
-import logging
 import json
 import os
 import shutil
@@ -22,6 +21,9 @@ import shutil
 from typing import Any
 from uuid import uuid4
 
+from celery import signals
+from celery.utils.log import get_task_logger
+from openrelik_common.logging import Logger
 from openrelik_worker_common.file_utils import create_output_file, OutputFile
 from openrelik_worker_common.task_utils import (
     create_task_result,
@@ -41,8 +43,6 @@ from .utils import (
     unmount_container,
 )
 
-# Set up task logger
-logger: logging.Logger = logging.getLogger(__name__)
 
 # Task name used to register and route the task to the correct queue.
 TASK_NAME: str = "openrelik-worker-containers.tasks.container_file_extract"
@@ -69,6 +69,18 @@ TASK_METADATA: dict[str, Any] = {
     ],
 }
 
+log_root = Logger()
+logger = log_root.get_logger(__name__, get_task_logger(__name__))
+
+
+@signals.task_prerun.connect
+def on_task_prerun(sender, task_id, task, args, kwargs, **_):
+    log_root.bind(
+        task_id=task_id,
+        task_name=task.name,
+        worker_name=TASK_METADATA.get("display_name"),
+    )
+
 
 @celery.task(bind=True, name=TASK_NAME, metadata=TASK_METADATA)
 def container_file_extraction(
@@ -92,6 +104,7 @@ def container_file_extraction(
         Base64-encoded dictionary containing task results.
     """
     task_id: str = self.request.id
+    log_root.bind(workflow_id=workflow_id)
     logger.debug(
         "Starting container worker task_id: %s, workflow_id: %s", task_id, workflow_id
     )
