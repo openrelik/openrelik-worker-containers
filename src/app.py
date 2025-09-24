@@ -25,5 +25,13 @@ REDIS_URL = os.getenv("REDIS_URL")
 celery = Celery(
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["src.container_drift", "src.container_list", "src.container_file_extract", "src.container_export"],
+    include=[
+        "src.container_drift",
+        "src.container_list",
+        "src.container_file_extract",
+        "src.container_export",
+    ],
+    worker_hijack_root_logger=False,  # Disable Celery hijacking configured Python loggers.
+    worker_log_format="%(message)s",
+    worker_task_log_format="%(message)s",
 )
