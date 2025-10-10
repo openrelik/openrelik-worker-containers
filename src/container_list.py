@@ -18,27 +18,24 @@ import json
 import os
 import shutil
 import subprocess
-
 from typing import Any
 from uuid import uuid4
-
 
 from celery import signals
 from celery.utils.log import get_task_logger
 from openrelik_common.logging import Logger
-from openrelik_worker_common.file_utils import create_output_file, OutputFile
+from openrelik_worker_common.file_utils import OutputFile, create_output_file
 from openrelik_worker_common.mount_utils import BlockDevice
 from openrelik_worker_common.reporting import (
     MarkdownDocument,
     MarkdownDocumentSection,
     MarkdownTable,
+    Report,
 )
-from openrelik_worker_common.reporting import Report
 from openrelik_worker_common.task_utils import create_task_result, get_input_files
 
 from .app import celery
 from .utils import CE_BINARY, COMPATIBLE_INPUTS, container_root_exists, log_entry
-
 
 # Task name used to register and route the task to the correct queue.
 TASK_NAME = "openrelik-worker-containers.tasks.container_list"
@@ -85,13 +82,9 @@ def container_list(
     """
     task_id: str = self.request.id
     log_root.bind(workflow_id=workflow_id)
-    logger.info(
-        "Starting task (%s) in workflow (%s) to list containers", task_id, workflow_id
-    )
+    logger.info("Starting task (%s) in workflow (%s) to list containers", task_id, workflow_id)
 
-    input_files = get_input_files(
-        pipe_result, input_files or [], filter=COMPATIBLE_INPUTS
-    )
+    input_files = get_input_files(pipe_result, input_files or [], filter=COMPATIBLE_INPUTS)
     output_files: list[dict] = []
 
     # task_files contains dict of OutputFile for local use only.
@@ -118,6 +111,9 @@ def container_list(
             task_report=report.to_dict(),
         )
 
+    # Indicate task progress start.
+    self.send_event("task-progress")
+
     for input_file in input_files:
         input_file_id: str = input_file.get("id", "")
         input_file_path: str = input_file.get("path", "")
@@ -138,9 +134,7 @@ def container_list(
 
             # Process each mountpoint looking for containers
             for mountpoint in mountpoints:
-                logger.debug(
-                    "Processing mountpoint %s for disk %s", mountpoint, input_file_id
-                )
+                logger.debug("Processing mountpoint %s for disk %s", mountpoint, input_file_id)
 
                 # Only process the mountpoint containing valid containerd or Docker root directory.
                 if not container_root_exists(mountpoint):
@@ -164,10 +158,8 @@ def container_list(
 
                 output_files.append(output_file.to_dict())
 
-        except RuntimeError as e:
-            logger.error(
-                "Encountered unexpected error while processing disk %s", input_file_id
-            )
+        except RuntimeError:
+            logger.error("Encountered unexpected error while processing disk %s", input_file_id)
         finally:
             logger.debug("Unmounting disk %s", input_file_id)
             log_entry(log_file, f"Done processing {input_file.get('path', '')}")
@@ -226,9 +218,7 @@ def create_markdown_report(output_path: str, output_files: list[dict]) -> Output
     )
 
     for output_file in output_files:
-        containers_info: list[dict[str, Any]] = _read_json_file(
-            output_file.get("path", "")
-        )
+        containers_info: list[dict[str, Any]] = _read_json_file(output_file.get("path", ""))
         for container_info in containers_info:
             _namespace = container_info.get("Namespace", "")
             _id: str = container_info.get("ID", "")
@@ -280,9 +270,7 @@ def list_containers(
 
     _list_containerd_containers(mountpoint, containerd_output_file.path)
 
-    containerd_containers_info: list[dict[str, Any]] = _read_json_file(
-        containerd_output_file.path
-    )
+    containerd_containers_info: list[dict[str, Any]] = _read_json_file(containerd_output_file.path)
     if containerd_containers_info:
         containers_info.extend(containerd_containers_info)
 
@@ -295,9 +283,7 @@ def list_containers(
 
     _list_docker_containers(mountpoint, docker_output_file.path)
 
-    docker_containers_info: list[dict[str, Any]] = _read_json_file(
-        docker_output_file.path
-    )
+    docker_containers_info: list[dict[str, Any]] = _read_json_file(docker_output_file.path)
     if docker_containers_info:
         containers_info.extend(docker_containers_info)
 
@@ -338,9 +324,7 @@ def _list_containerd_containers(mountpoint: str, container_output_file: str) -> 
         if process.returncode == 0:
             logger.debug("Successfully listed containerd containers at %s", mountpoint)
         else:
-            logger.error(
-                "Container explorer failed listing containers at %s", mountpoint
-            )
+            logger.error("Container explorer failed listing containers at %s", mountpoint)
     except subprocess.CalledProcessError as err:
         logger.debug("Error running container explorer process: %s", str(err))
 
@@ -368,9 +352,7 @@ def _list_docker_containers(mountpoint: str, container_output_file: str) -> None
         if process.returncode == 0:
             logger.debug("Successfully listed Docker containers at %s", mountpoint)
         else:
-            logger.error(
-                "Container explorer failed listing containers at %s", mountpoint
-            )
+            logger.error("Container explorer failed listing containers at %s", mountpoint)
     except subprocess.CalledProcessError as err:
         logger.debug("Error running container explorer process: %s", str(err))
 

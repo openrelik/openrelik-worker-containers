@@ -17,21 +17,19 @@
 import json
 import os
 import shutil
-
 from typing import Any
 from uuid import uuid4
 
 from celery import signals
 from celery.utils.log import get_task_logger
 from openrelik_common.logging import Logger
-from openrelik_worker_common.file_utils import create_output_file, OutputFile
+from openrelik_worker_common.file_utils import OutputFile, create_output_file
+from openrelik_worker_common.mount_utils import BlockDevice
+from openrelik_worker_common.reporting import MarkdownDocumentSection, Report
 from openrelik_worker_common.task_utils import (
     create_task_result,
     get_input_files,
 )
-from openrelik_worker_common.mount_utils import BlockDevice
-from openrelik_worker_common.reporting import MarkdownDocumentSection, Report
-
 
 from .app import celery
 from .container_list import list_containers
@@ -42,7 +40,6 @@ from .utils import (
     mount_container,
     unmount_container,
 )
-
 
 # Task name used to register and route the task to the correct queue.
 TASK_NAME: str = "openrelik-worker-containers.tasks.container_file_extract"
@@ -105,9 +102,7 @@ def container_file_extraction(
     """
     task_id: str = self.request.id
     log_root.bind(workflow_id=workflow_id)
-    logger.debug(
-        "Starting container worker task_id: %s, workflow_id: %s", task_id, workflow_id
-    )
+    logger.debug("Starting container worker task_id: %s, workflow_id: %s", task_id, workflow_id)
 
     # Task output files that can be provided to next worker for processing.
     output_files: list[dict] = []
@@ -134,9 +129,7 @@ def container_file_extraction(
     ]
 
     file_path_str: str = task_config.get("file_paths", "")
-    file_paths: list[str] = [
-        file_path.strip() for file_path in file_path_str.split(",")
-    ]
+    file_paths: list[str] = [file_path.strip() for file_path in file_path_str.split(",")]
 
     report_bullet: list[str] = []
 
@@ -175,6 +168,9 @@ def container_file_extraction(
             task_report=report.to_dict(),
         )
 
+    # Indicate task progress start.
+    self.send_event("task-progress")
+
     for input_file in input_files:
         input_file_path: str = input_file.get("path", "")
         if not input_file_path:
@@ -185,16 +181,12 @@ def container_file_extraction(
         input_file_name: str = input_file.get("display_name", "unknown")
 
         try:
-            bd: BlockDevice = BlockDevice(
-                image_path=input_file_path, max_mountpath_size=11
-            )
+            bd: BlockDevice = BlockDevice(image_path=input_file_path, max_mountpath_size=11)
             bd.setup()
 
             mountpoints: list[str] = bd.mount()
             if not mountpoints:
-                logger.info(
-                    "No mountpoints returned for input file %s", input_file_name
-                )
+                logger.info("No mountpoints returned for input file %s", input_file_name)
                 bd.umount()
                 continue
 
@@ -208,15 +200,13 @@ def container_file_extraction(
                     )
                     continue
 
-                extracted_output_files: list[dict[str, Any]] = (
-                    run_container_file_extraction(
-                        input_file,
-                        output_path,
-                        log_file,
-                        mountpoint,
-                        container_ids,
-                        file_paths,
-                    )
+                extracted_output_files: list[dict[str, Any]] = run_container_file_extraction(
+                    input_file,
+                    output_path,
+                    log_file,
+                    mountpoint,
+                    container_ids,
+                    file_paths,
                 )
                 if not extracted_output_files:
                     logger.info("No files extracted from mountpoint %s", mountpoint)
@@ -239,9 +229,7 @@ def container_file_extraction(
         logger.debug("Processing input %s completed", input_file_name)
     logger.debug("Completed processing %d input disks", len(input_files))
 
-    logger.debug(
-        "%d files extracted from %d input disks", len(output_files), len(input_files)
-    )
+    logger.debug("%d files extracted from %d input disks", len(output_files), len(input_files))
 
     report: Report = create_task_report(output_files)
 
@@ -272,9 +260,7 @@ def create_task_report(output_files: list[dict], content: str = "") -> Report:
         else:
             filename = f"{display_name}"
 
-        report_section.add_bullet(
-            f"{filename} extracted to {output_file.get('path', '')}"
-        )
+        report_section.add_bullet(f"{filename} extracted to {output_file.get('path', '')}")
 
     return report
 
@@ -303,9 +289,7 @@ def run_container_file_extraction(
         disk_mountpoint,
     )
     if not containers:
-        logger.debug(
-            "No containers in the input disk %s (%s)", input_file_id, disk_mountpoint
-        )
+        logger.debug("No containers in the input disk %s (%s)", input_file_id, disk_mountpoint)
         log_entry(log_file, f"No containers in the input disk {input_file_id}")
 
         return []
@@ -348,10 +332,7 @@ def run_container_file_extraction(
         ret_container_mount_dir: str | None = mount_container(
             container_id, container_namespace, disk_mountpoint, container_mount_dir
         )
-        if (
-            not ret_container_mount_dir
-            or ret_container_mount_dir != container_mount_dir
-        ):
+        if not ret_container_mount_dir or ret_container_mount_dir != container_mount_dir:
             logger.error(
                 "Mounting container %s - Returned container mountpoint is null or does not exist",
                 container_id,
@@ -446,9 +427,7 @@ def _extract_file_and_directory(
             continue
 
         if os.path.isfile(file_to_extract):
-            extracted_file: dict[str, Any] = _extract_regular_file(
-                output_path, file_to_extract
-            )
+            extracted_file: dict[str, Any] = _extract_regular_file(output_path, file_to_extract)
             if extracted_file:
                 extracted_output_files.append(extracted_file)
         elif os.path.isdir(file_to_extract):
@@ -527,9 +506,7 @@ def _archive_and_extract_directory(
             root_dir=root_dir,
             base_dir=base_dir,
         )
-        logger.debug(
-            "Successfully archived directory %s to %s", file_path, archive_path
-        )
+        logger.debug("Successfully archived directory %s to %s", file_path, archive_path)
     except FileNotFoundError:
         logger.error("Root directory %s for archiving not found.", root_dir)
         return {}
