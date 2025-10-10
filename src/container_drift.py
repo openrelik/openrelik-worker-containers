@@ -15,16 +15,15 @@
 """Shows filesystem files and directories changes in containers."""
 
 import csv
-import logging
 import json
+import logging
 import os
 import shutil
 import subprocess
-
 from typing import Any
 from uuid import uuid4
 
-from openrelik_worker_common.file_utils import create_output_file, OutputFile
+from openrelik_worker_common.file_utils import OutputFile, create_output_file
 from openrelik_worker_common.mount_utils import BlockDevice
 from openrelik_worker_common.reporting import MarkdownDocumentSection, Report
 from openrelik_worker_common.task_utils import create_task_result, get_input_files
@@ -110,6 +109,9 @@ def container_drift(
             task_report=report.to_dict(),
         )
 
+    # Indicate task progress start.
+    self.send_event("task-progress")
+
     for input_file in input_files:
         input_file_path: str = input_file.get("path", "")
         if not input_file_path:
@@ -120,9 +122,7 @@ def container_drift(
         try:
             # Using shorter mountpoint like /mnt/abcdef.
             # Overlay mount layers can get large and reach mount option limit of 4KB.
-            bd: BlockDevice = BlockDevice(
-                image_path=input_file_path, max_mountpath_size=11
-            )
+            bd: BlockDevice = BlockDevice(image_path=input_file_path, max_mountpath_size=11)
             bd.setup()
 
             mountpoints: list[str] = bd.mount()
@@ -136,26 +136,18 @@ def container_drift(
                 logger.debug("Processing mountpoint %s", mountpoint)
 
                 if not container_root_exists(mountpoint):
-                    logger.info(
-                        "No container root directory in the mountpoint %s", mountpoint
-                    )
+                    logger.info("No container root directory in the mountpoint %s", mountpoint)
                     continue
 
                 drift_data: list[dict] = run_container_drift(
                     input_file, output_path, log_file, mountpoint
                 )
                 if not drift_data:
-                    logger.info(
-                        "No container drift for containers in mountpoint %s", mountpoint
-                    )
-                    log_entry(
-                        log_file, "No container drift for containers in input file."
-                    )
+                    logger.info("No container drift for containers in mountpoint %s", mountpoint)
+                    log_entry(log_file, "No container drift for containers in input file.")
                     continue
 
-                drift_output_files: list[dict] = _create_drift_output_files(
-                    output_path, drift_data
-                )
+                drift_output_files: list[dict] = _create_drift_output_files(output_path, drift_data)
                 output_files.extend(drift_output_files)
 
         except RuntimeError as e:
@@ -335,9 +327,7 @@ def _get_container_drift_data(path: str) -> list[dict]:
             data: list[dict] = json.loads(file_handler.read())
             return _flattern_container_drift_data(data)
     except FileNotFoundError as e:
-        logger.error(
-            "File %s container container drift output does not exist: %s", path, str(e)
-        )
+        logger.error("File %s container container drift output does not exist: %s", path, str(e))
         return []
     except json.decoder.JSONDecodeError as e:
         logger.error("Error loading container drift output from %s: %s", path, str(e))
@@ -376,9 +366,7 @@ def _flattern_container_drift_data(data: list[dict]) -> list[dict]:
         if inaccessible_files and isinstance(inaccessible_files, list):
             for file_info in inaccessible_files:
                 drift_data.append(
-                    _create_drift_record(
-                        container_id, container_type, "File deleted", file_info
-                    )
+                    _create_drift_record(container_id, container_type, "File deleted", file_info)
                 )
 
     return drift_data
