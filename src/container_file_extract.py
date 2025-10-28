@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from celery import signals
 from celery.utils.log import get_task_logger
+from openrelik_common import telemetry
 from openrelik_common.logging import Logger
 from openrelik_worker_common.file_utils import OutputFile, create_output_file
 from openrelik_worker_common.mount_utils import BlockDevice
@@ -148,6 +149,10 @@ def container_file_extraction(
     input_files = get_input_files(
         pipe_result=pipe_result, input_files=input_files or [], filter=COMPATIBLE_INPUTS
     )
+
+    telemetry.add_attribute_to_current_span("input_files", input_files)
+    telemetry.add_attribute_to_current_span("task_config", task_config)
+    telemetry.add_attribute_to_current_span("workflow_id", workflow_id)
 
     if not input_files:
         logger.warning("No supported input files provided.")
