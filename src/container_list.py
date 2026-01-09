@@ -63,11 +63,11 @@ def on_task_prerun(sender, task_id, task, args, kwargs, **_):
 @celery.task(bind=True, name=TASK_NAME, metadata=TASK_METADATA)
 def container_list(
     self,
-    pipe_result: str = "",
-    input_files: list[dict] = [],
-    output_path: str = "",
-    workflow_id: str = "",
-    task_config: dict[str, Any] = {},
+    pipe_result: str = None,
+    input_files: list[dict] = None,
+    output_path: str = None,
+    workflow_id: str = None,
+    task_config: dict[str, Any] = None,
 ) -> str:
     """List containers on a disk.
 
